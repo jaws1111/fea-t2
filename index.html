@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b0f19" />
+    <title>3D Topology Optimization Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="/src/styles/main.css" />
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  </head>
+  <body class="relative flex h-screen w-screen overflow-hidden bg-studio">
+    <!-- 3D Viewport -->
+    <div id="viewport" class="relative h-full min-w-0 flex-1">
+      <canvas id="three-canvas" class="h-full w-full"></canvas>
+
+      <!-- Brand Header -->
+      <header class="glass-panel absolute left-4 top-4 z-10 flex items-center gap-3 rounded-xl px-4 py-2.5">
+        <div
+          class="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 font-bold text-white shadow-lg shadow-indigo-500/30"
+        >
+          <i class="ph ph-cube-transparent text-xl"></i>
+        </div>
+        <div>
+          <h1 class="flex items-center gap-2 text-sm font-semibold tracking-wide text-white">
+            TopoOpt 3D
+            <span id="badge-backend" class="badge-backend" data-backend="cpu">Worker · CPU</span>
+          </h1>
+          <p class="text-xs text-slate-400">Zero-Stutter Threading • Transferable Buffers • Continuous PCG</p>
+        </div>
+      </header>
+
+      <!-- Render Modes Toolbar -->
+      <nav class="glass-panel absolute right-4 top-4 z-10 flex items-center gap-1 rounded-xl p-1.5" aria-label="View mode">
+        <button id="view-density" class="btn-tab is-active" type="button"><i class="ph ph-paint-brush"></i> Turbo Density</button>
+        <button id="view-viridis" class="btn-tab" type="button"><i class="ph ph-palette"></i> Viridis</button>
+        <button id="view-metal" class="btn-tab" type="button"><i class="ph ph-cube"></i> Metallic</button>
+        <button id="view-energy" class="btn-tab" type="button"><i class="ph ph-fire"></i> Strain Energy</button>
+        <button id="view-smooth" class="btn-tab" type="button" title="Marching cubes + Taubin smooth"><i class="ph ph-sphere"></i> Smooth Body</button>
+        <div class="mx-1 h-4 w-px bg-slate-700"></div>
+        <button
+          id="btn-reset-cam"
+          type="button"
+          title="Center View"
+          aria-label="Center view"
+          class="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-white"
+        >
+          <i class="ph ph-crosshair text-base"></i>
+        </button>
+      </nav>
+
+      <!-- Bottom stack: telemetry + legend, then performance monitor -->
+      <div class="pointer-events-none absolute bottom-4 left-4 right-4 z-10 flex flex-col gap-3">
+        <div class="flex flex-wrap items-end justify-between gap-3">
+          <!-- Telemetry -->
+          <section
+            class="glass-panel pointer-events-auto flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl px-4 py-3 text-xs"
+            aria-label="Telemetry"
+          >
+            <div>
+              <div class="stat-label">Compute Speed</div>
+              <div id="stat-speed" class="stat-value text-emerald-400">
+                0.0 Hz <span class="text-[10px] font-normal text-slate-400">(0 ms)</span>
+              </div>
+            </div>
+            <div class="h-6 w-px bg-slate-800"></div>
+            <div>
+              <div class="stat-label">Render FPS</div>
+              <div id="stat-fps" class="stat-value text-white">60 FPS</div>
+            </div>
+            <div class="h-6 w-px bg-slate-800"></div>
+            <div>
+              <div class="stat-label">Iteration</div>
+              <div id="stat-iter" class="stat-value text-white">0</div>
+            </div>
+            <div class="h-6 w-px bg-slate-800"></div>
+            <div>
+              <div class="stat-label">Volume (Actual / Target)</div>
+              <div id="stat-vol" class="stat-value text-sky-400">0.350 / 0.350</div>
+            </div>
+            <div class="h-6 w-px bg-slate-800"></div>
+            <div>
+              <div class="stat-label">Compliance</div>
+              <div id="stat-compliance" class="stat-value text-purple-400">0.000</div>
+            </div>
+            <div class="h-6 w-px bg-slate-800"></div>
+            <div>
+              <div class="stat-label">PCG Residual</div>
+              <div id="stat-cg-res" class="stat-value text-amber-400">0.00e+0</div>
+            </div>
+          </section>
+
+          <!-- Density Legend -->
+          <section class="glass-panel pointer-events-auto flex items-center gap-3 rounded-xl px-3 py-2" aria-label="Color legend">
+            <span id="legend-min" class="font-mono text-[10px] text-slate-400">Void</span>
+            <div id="legend-ramp" class="h-2 w-28 rounded-full border border-slate-700"></div>
+            <span id="legend-max" class="font-mono text-[10px] text-slate-400">Solid (1.0)</span>
+          </section>
+        </div>
+
+        <!-- Performance Monitor (uPlot graphs mount here) -->
+        <section id="perf-monitor" class="glass-panel pointer-events-auto" aria-label="Performance monitor"></section>
+      </div>
+    </div>
+
+    <!-- Right Controls Sidebar -->
+    <aside class="glass-panel z-20 flex h-full w-80 shrink-0 flex-col overflow-hidden border-l border-slate-800">
+      <div class="border-b border-slate-800 p-5 pb-3">
+        <h2 class="mb-1 text-sm font-semibold tracking-wide text-white">FEA Topology Studio</h2>
+        <p class="mb-3 text-xs text-slate-400">Continuous Structural Optimization</p>
+        <div class="flex gap-1 rounded-lg bg-slate-900/80 p-1" role="tablist" aria-label="Sidebar panels">
+          <button id="tab-optimize" class="btn-sidebar-tab is-active" type="button" role="tab" aria-selected="true">Optimize</button>
+          <button id="tab-scene" class="btn-sidebar-tab" type="button" role="tab" aria-selected="false" title="Custom Scene editor">Scene</button>
+          <button id="tab-stage" class="btn-sidebar-tab" type="button" role="tab" aria-selected="false" title="Stage optimizer: coarse → fine grid refinement">Stages</button>
+        </div>
+      </div>
+
+      <!-- OPTIMIZE TAB -->
+      <div id="panel-optimize" class="flex-1 space-y-5 overflow-y-auto p-5" role="tabpanel">
+        <!-- Presets -->
+        <div class="space-y-2">
+          <div class="section-label">Problem Archetype</div>
+          <div class="grid grid-cols-3 gap-2">
+            <button id="preset-bridge" class="btn-preset is-active" type="button">Bridge Arch</button>
+            <button id="preset-deck" class="btn-preset" type="button">Deck Bridge</button>
+            <button id="preset-cantilever" class="btn-preset" type="button">Cantilever</button>
+          </div>
+          <div class="grid grid-cols-2 gap-2 pt-1">
+            <button id="preset-mbb" class="btn-preset" type="button">MBB Beam</button>
+            <button id="preset-michell" class="btn-preset" type="button">Michell Wheel</button>
+          </div>
+          <button id="preset-custom" class="btn-preset w-full" type="button">Custom Scene</button>
+        </div>
+
+        <!-- Resolution -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between text-xs">
+            <label for="select-res" class="font-medium text-slate-300">Voxel Domain</label>
+            <span id="label-res" class="font-mono text-indigo-400">36 x 15 x 8 (4,320)</span>
+          </div>
+          <select
+            id="select-res"
+            class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
+          >
+            <option value="20x8x4">Fast (640)</option>
+            <option value="24x10x4">Balanced (960)</option>
+            <option value="30x12x6">Detailed (2,160)</option>
+            <option value="36x15x8" selected>High Res (4,320)</option>
+            <option value="40x16x10">Ultra (6,400)</option>
+            <option value="48x20x12">GPU Heavy (11,520)</option>
+            <option value="64x24x16">GPU Max (24,576)</option>
+            <option value="48x24x16">Vessel (48×24×16 = 18,432)</option>
+            <option value="32x32x32">Cube (32³ = 32,768)</option>
+            <option value="80x40x16">50k (80×40×16 = 51,200)</option>
+            <option value="100x40x20">80k (100×40×20 = 80,000)</option>
+            <option value="100x50x20">100k (100×50×20 = 100,000)</option>
+            <option value="120x50x25">150k (120×50×25 = 150,000)</option>
+            <option value="160x50x25">200k (160×50×25 = 200,000)</option>
+            <option value="200x50x25">250k (200×50×25 = 250,000)</option>
+            <option value="200x60x25">300k (200×60×25 = 300,000)</option>
+          </select>
+        </div>
+
+        <!-- Solver options (grouped, compact) -->
+        <div class="space-y-3 border-t border-slate-800 pt-3">
+          <div class="section-label">SIMP</div>
+          <div class="grid grid-cols-2 gap-x-3 gap-y-2">
+            <div class="space-y-1">
+              <div class="flex justify-between text-[11px]">
+                <label for="input-volfrac" class="text-slate-300">Volume frac</label>
+                <span id="val-volfrac" class="font-mono text-indigo-400">0.35</span>
+              </div>
+              <input id="input-volfrac" type="range" min="0.15" max="0.65" step="0.05" value="0.35" />
+            </div>
+            <div class="space-y-1">
+              <div class="flex justify-between text-[11px]">
+                <label for="input-penal" class="text-slate-300">Penal p</label>
+                <span id="val-penal" class="font-mono text-indigo-400">3.0</span>
+              </div>
+              <input id="input-penal" type="range" min="1.0" max="4.0" step="0.5" value="3.0" />
+            </div>
+            <div class="space-y-1">
+              <div class="flex justify-between text-[11px]">
+                <label for="input-rmin" class="text-slate-300">Filter r<sub>min</sub></label>
+                <span id="val-rmin" class="font-mono text-indigo-400">1.6</span>
+              </div>
+              <input id="input-rmin" type="range" min="1.1" max="6" step="0.1" value="1.6" />
+            </div>
+            <div class="space-y-1">
+              <div class="flex justify-between text-[11px]">
+                <label for="input-batch" class="text-slate-300">Batch / tick</label>
+                <span id="val-batch" class="font-mono text-indigo-400">1</span>
+              </div>
+              <input id="input-batch" type="range" min="1" max="5" step="1" value="1" />
+            </div>
+          </div>
+
+          <div class="section-label pt-1">Display</div>
+          <div class="grid grid-cols-2 gap-x-3 gap-y-2">
+            <div class="space-y-1">
+              <div class="flex justify-between text-[11px]">
+                <label for="input-cutoff" class="text-slate-300">Cutoff</label>
+                <span id="val-cutoff" class="font-mono text-indigo-400">0.18</span>
+              </div>
+              <input id="input-cutoff" type="range" min="0.05" max="0.55" step="0.01" value="0.18" />
+            </div>
+            <div class="space-y-1">
+              <div class="flex justify-between text-[11px]">
+                <label for="input-defscale" class="text-slate-300">Deform</label>
+                <span id="val-defscale" class="font-mono text-indigo-400">0x</span>
+              </div>
+              <input id="input-defscale" type="range" min="0" max="50" step="5" value="0" />
+            </div>
+          </div>
+
+          <div class="section-label pt-1">Smooth body</div>
+          <div class="grid grid-cols-2 gap-x-3 gap-y-2">
+            <div class="space-y-1">
+              <div class="flex justify-between text-[11px]">
+                <label for="input-smooth-iso" class="text-slate-300">Iso</label>
+                <span id="val-smooth-iso" class="font-mono text-indigo-400">0.45</span>
+              </div>
+              <input id="input-smooth-iso" type="range" min="0.15" max="0.85" step="0.05" value="0.45" />
+            </div>
+            <div class="space-y-1">
+              <div class="flex justify-between text-[11px]">
+                <label for="input-smooth-iters" class="text-slate-300">Taubin</label>
+                <span id="val-smooth-iters" class="font-mono text-indigo-400">4</span>
+              </div>
+              <input id="input-smooth-iters" type="range" min="0" max="20" step="1" value="4" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Run & Actions -->
+        <div class="space-y-2 border-t border-slate-800 pt-4">
+          <button id="btn-toggle-run" class="btn-run" type="button" aria-pressed="false">
+            <i class="ph-fill ph-play text-sm"></i> <span>Start Optimization Loop</span>
+          </button>
+          <div class="grid grid-cols-2 gap-2">
+            <button id="btn-step" class="btn-secondary" type="button">
+              <i class="ph ph-step-forward text-sm"></i> <span id="label-step">Step 1 Iter</span>
+            </button>
+            <button id="btn-reset" class="btn-secondary" type="button">
+              <i class="ph ph-arrow-counter-clockwise text-sm"></i> Reset Grid
+            </button>
+          </div>
+        </div>
+
+        <div class="space-y-1 rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-[11px] text-slate-400">
+          <div class="mb-1 flex items-center gap-1.5 font-semibold text-slate-300">
+            <i class="ph ph-lightning text-sm text-amber-400"></i> Thread-Decoupled Performance
+          </div>
+          <p>• <span class="text-emerald-400">Zero UI Jitter:</span> FEA on a worker; orbit stays at full FPS.</p>
+          <p>• <span class="text-sky-400">Smooth Body:</span> marching cubes + Taubin volume-preserving smooth.</p>
+          <p>• <span class="text-amber-400">Large domains:</span> 50k–150k voxels for GPU fill.</p>
+        </div>
+      </div>
+
+      <!-- CUSTOM SCENE TAB -->
+      <div id="panel-scene" class="hidden flex-1 space-y-2.5 overflow-y-auto p-3" role="tabpanel">
+        <p class="text-[10px] leading-snug text-slate-400">
+          Supports &amp; loads in normalized coords (0–1).
+          <span class="text-slate-500">Del</span> deletes · <span class="text-slate-500">Ctrl+Z</span> undoes.
+          Drag viewport markers with the gizmo.
+        </p>
+
+        <div id="scene-examples" class="grid grid-cols-2 gap-1.5"></div>
+
+        <div class="space-y-1">
+          <div class="section-label">Add</div>
+          <div class="grid grid-cols-4 gap-1">
+            <button id="btn-add-bolt-pair" class="btn-tool !py-1 col-span-2" type="button" title="Clamped hole + loaded hole, rigidly linked (bracket starter)"><i class="ph ph-link"></i> Bolt pair</button>
+            <button id="btn-add-bolt-hole" class="btn-tool !py-1" type="button" title="Clamped bolt hole (void bore + solid boss, fixed)"><i class="ph ph-circle"></i> Fixed</button>
+            <button id="btn-add-bolt-loaded" class="btn-tool !py-1" type="button" title="Loaded bolt hole: directional, multi-vector or circular load on the bore"><i class="ph ph-arrows-clockwise"></i> Loaded</button>
+            <button id="btn-add-wall-pad" class="btn-tool !py-1" type="button" title="Wall mounting pad"><i class="ph ph-square"></i> Wall</button>
+            <button id="btn-add-rest" class="btn-tool !py-1" type="button" title="Rest / foot support"><i class="ph ph-map-pin"></i> Rest</button>
+            <button id="btn-add-point-load" class="btn-tool !py-1" type="button"><i class="ph ph-arrow-down"></i> Point</button>
+            <button id="btn-add-pressure" class="btn-tool !py-1" type="button" title="Pressure cavity (void + locked wall)"><i class="ph ph-waves"></i> Press</button>
+          </div>
+        </div>
+
+        <div class="space-y-1">
+          <div class="flex items-center justify-between">
+            <div class="section-label">Objects</div>
+            <button id="btn-scene-undo" class="text-[10px] text-slate-400 hover:text-indigo-300" type="button" title="Ctrl+Z">Undo</button>
+          </div>
+          <ul id="list-scene-objects" class="scene-list max-h-40 space-y-0.5 overflow-y-auto"></ul>
+          <div id="scene-warnings" class="hidden space-y-0.5 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] leading-snug text-amber-200"></div>
+        </div>
+
+        <div id="scene-inspector" class="hidden space-y-1.5 rounded-lg border border-slate-700 bg-slate-900/70 p-2">
+          <div class="flex items-center justify-between">
+            <span id="inspector-title" class="text-xs font-semibold text-slate-200">Edit</span>
+            <button id="btn-inspector-delete" class="text-[11px] text-rose-400 hover:text-rose-300" type="button" title="Delete (Del)">Delete</button>
+          </div>
+          <div id="inspector-fields" class="grid grid-cols-2 gap-1.5 text-[11px]"></div>
+        </div>
+
+        <div class="space-y-1.5 rounded-lg border border-slate-800 bg-slate-900/40 p-2">
+          <div class="section-label">Working volume</div>
+          <div class="grid grid-cols-3 gap-1">
+            <button id="wv-mode-full" class="btn-secondary !py-1 text-[10px]" type="button" data-wv-mode="full" title="Entire FEA domain">Full</button>
+            <button id="wv-mode-auto" class="btn-secondary !py-1 text-[10px]" type="button" data-wv-mode="auto" title="Fit AABB around supports &amp; loads">Auto</button>
+            <button id="wv-mode-manual" class="btn-secondary !py-1 text-[10px]" type="button" data-wv-mode="manual" title="Edit bounds manually">Manual</button>
+          </div>
+          <p id="wv-hint" class="text-[10px] leading-snug text-slate-500">Auto fits a box around scene objects (+ padding).</p>
+          <div id="wv-bounds" class="grid grid-cols-3 gap-1 text-[10px] text-slate-400">
+            <label class="flex flex-col gap-0.5">X0<input id="wv-x0" type="number" min="0" max="1" step="0.05" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
+            <label class="flex flex-col gap-0.5">Y0<input id="wv-y0" type="number" min="0" max="1" step="0.05" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
+            <label class="flex flex-col gap-0.5">Z0<input id="wv-z0" type="number" min="0" max="1" step="0.05" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
+            <label class="flex flex-col gap-0.5">X1<input id="wv-x1" type="number" min="0" max="1" step="0.05" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
+            <label class="flex flex-col gap-0.5">Y1<input id="wv-y1" type="number" min="0" max="1" step="0.05" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
+            <label class="flex flex-col gap-0.5">Z1<input id="wv-z1" type="number" min="0" max="1" step="0.05" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
+          </div>
+          <div class="flex items-center gap-2 text-[10px] text-slate-400">
+            <label class="flex items-center gap-1">Pad
+              <input id="wv-padding" type="number" min="0" max="0.4" step="0.02" value="0.1" class="w-14 rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" />
+            </label>
+            <button id="btn-wv-refit" class="text-indigo-300 hover:text-indigo-200" type="button">Refit auto</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-1.5 border-t border-slate-800 pt-2">
+          <button id="btn-scene-clear" class="btn-secondary !py-1.5" type="button" title="Remove all objects">Clear</button>
+          <button id="btn-scene-apply" class="btn-run !py-1.5" type="button">Apply Scene</button>
+        </div>
+      </div>
+
+      <!-- STAGE OPTIMIZER TAB -->
+      <div id="panel-stage" class="hidden flex-1 space-y-3 overflow-y-auto p-3" role="tabpanel">
+        <p class="text-[10px] leading-snug text-slate-400">
+          Run on a coarse grid, pause when happy, then <b class="text-slate-300">refine</b>: the density field is
+          interpolated onto the next, denser grid and the optimisation continues from there.
+          Grids keep the aspect of the Voxel Domain chosen on the Optimize tab.
+        </p>
+
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between">
+            <div class="section-label">Stages</div>
+            <span id="stage-aspect" class="font-mono text-[10px] text-slate-500"></span>
+          </div>
+          <ul id="stage-list" class="space-y-1"></ul>
+          <button id="btn-stage-add" class="btn-secondary w-full !py-1 text-[10px]" type="button"><i class="ph ph-plus"></i> Add stage</button>
+        </div>
+
+        <div id="stage-live" class="rounded-lg border border-slate-800 bg-slate-900/60 p-2 text-[11px] text-slate-400"></div>
+
+        <div class="space-y-1.5">
+          <button id="btn-stage-auto" class="btn-run" type="button" aria-pressed="false" title="Runs every stage in order: each coarse stage stops when it has settled (or hits its cap), is refined onto the next grid automatically, and the last stage runs to convergence.">
+            <i class="ph-fill ph-rocket-launch text-sm"></i> <span>Run all stages (auto)</span>
+          </button>
+          <button id="btn-stage-run" class="btn-secondary w-full !py-1.5 text-[11px]" type="button" aria-pressed="false">
+            <i class="ph-fill ph-play text-sm"></i> <span>Start stage 1</span>
+          </button>
+          <div class="grid grid-cols-3 gap-1.5">
+            <button id="btn-stage-prev" class="btn-secondary !py-1.5 text-[10px]" type="button" title="Go back to the previous (coarser) stage result"><i class="ph ph-caret-left"></i> Back</button>
+            <button id="btn-stage-redo" class="btn-secondary !py-1.5 text-[10px]" type="button" title="Restart this stage from its starting field"><i class="ph ph-arrow-counter-clockwise"></i> Redo</button>
+            <button id="btn-stage-next" class="btn-secondary !py-1.5 text-[10px]" type="button" title="Pause, interpolate onto the next grid and continue"><i class="ph ph-arrow-fat-lines-up"></i> Refine</button>
+          </div>
+          <button id="btn-stage-restart" class="btn-secondary w-full !py-1 text-[10px]" type="button" title="Discard all stage results and start from stage 1">Restart from stage 1</button>
+        </div>
+
+        <div class="space-y-1.5 border-t border-slate-800 pt-2">
+          <div class="section-label">Options</div>
+          <label class="flex items-center gap-1.5 text-[11px] text-slate-300">
+            <input id="stage-opt-rmin" type="checkbox" checked class="rounded border-slate-600" />
+            Scale filter r<sub>min</sub> with grid (same physical length)
+          </label>
+          <label class="flex items-center gap-1.5 text-[11px] text-slate-300">
+            <input id="stage-opt-autorun" type="checkbox" checked class="rounded border-slate-600" />
+            Run immediately after starting / refining
+          </label>
+          <div class="space-y-1">
+            <div class="flex justify-between text-[11px]">
+              <label for="stage-opt-sharpen" class="text-slate-300">Edge sharpening on refine</label>
+              <span id="val-stage-sharpen" class="font-mono text-indigo-400">0.25</span>
+            </div>
+            <input id="stage-opt-sharpen" type="range" min="0" max="1" step="0.05" value="0.25" />
+          </div>
+          <label class="flex items-center gap-1.5 text-[11px] text-slate-300">
+            <input id="stage-opt-autopause" type="checkbox" class="rounded border-slate-600" />
+            Auto-pause when ΔC &lt;
+            <input id="stage-opt-tol" type="number" min="0.1" max="20" step="0.1" value="1" class="w-12 rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" />
+            % over 10 it
+          </label>
+          <label class="flex items-center gap-1.5 text-[11px] text-slate-300">
+            <input id="stage-opt-autoadvance" type="checkbox" class="rounded border-slate-600" />
+            Auto-refine when a stage auto-pauses / hits its cap
+          </label>
+          <div class="rounded border border-slate-800 bg-slate-900/50 p-1.5 text-[11px] text-slate-300">
+            <div class="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Run all stages (auto)</div>
+            <label class="flex items-center gap-1.5">
+              Coarse stages stop at ΔC &lt;
+              <input id="stage-opt-coarse-tol" type="number" min="0.1" max="30" step="0.5" value="3" class="w-12 rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" />
+              % / 10 it
+            </label>
+            <label class="mt-1 flex items-center gap-1.5">
+              Final stage stops at ΔC &lt;
+              <input id="stage-opt-final-tol" type="number" min="0.05" max="20" step="0.1" value="0.5" class="w-12 rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" />
+              % / 10 it
+            </label>
+            <label class="mt-1 flex items-center gap-1.5">
+              Iteration cap (when a stage has none)
+              <input id="stage-opt-auto-cap" type="number" min="20" max="3000" step="10" value="300" class="w-14 rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" />
+            </label>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

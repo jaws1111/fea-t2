@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>GPU PCG Bench</title>
+    <style>
+      body { font-family: ui-monospace, monospace; background: #0b0f19; color: #e2e8f0; padding: 24px; }
+      pre { background: #111827; padding: 16px; border-radius: 8px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>WebGPU PCG utilisation bench</h1>
+    <p>Runs resident GPU PCG (no per-iter sync) vs CPU. Watch Task Manager GPU while this runs.</p>
+    <pre id="out">Starting…</pre>
+    <script type="module">
+      import { createSolverBackend } from '/src/solver/backend.js';
+      import { KE_24x24 } from '/src/fea/hex8Ke.js';
+
+      const out = document.getElementById('out');
+      const log = (s) => { out.textContent += s + '\n'; };
+
+      const grids = [
+        [24, 10, 4],
+        [36, 15, 8],
+        [48, 20, 12],
+        [64, 24, 16],
+      ];
+
+      async function run() {
+        out.textContent = '';
+        const backend = await createSolverBackend({ preferGpu: true, autoTune: false });
+        log(`Backend: ${backend.getName()}  gpuAvailable=${backend.isGpuAvailable()}`);
+        if (backend.getInitError()) log(`Init error: ${backend.getInitError()}`);
+
+        for (const [nx, ny, nz] of grids) {
+          const n = nx * ny * nz;
+          const xPhys = new Float32Array(n);
+          for (let i = 0; i < n; i++) xPhys[i] = 0.35;
+          const t0 = performance.now();
+          const r = await backend.solve({
+            nx, ny, nz, penal: 3, preset: 'bridge', xPhys, globalU: null, KE: KE_24x24,
+          });
+          const ms = performance.now() - t0;
+          log(
+            `${nx}x${ny}x${nz} (${n} el, ${3 * (nx + 1) * (ny + 1) * (nz + 1)} dofs)  ` +
+              `backend=${r.backend}  feaMs=${(r.feaMs ?? ms).toFixed(1)}  wall=${ms.toFixed(1)}  ` +
+              `cgIters=${r.cgIters ?? '?'}  C=${r.compliance.toFixed(3)}  res=${r.cgResidual.toExponential(2)}`,
+          );
+        }
+
+        // Sustained load: hammer GPU Max for ~8s so Task Manager can show occupancy
+        log('\nSustained GPU hammer (64x24x16) for ~8s — check GPU compute % …');
+        const [nx, ny, nz] = [64, 24, 16];
+        const n = nx * ny * nz;
+        const xPhys = new Float32Array(n).fill(0.35);
+        const tEnd = performance.now() + 8000;
+        let count = 0;
+        let sumMs = 0;
+        while (performance.now() < tEnd) {
+          const t0 = performance.now();
+          await backend.solve({
+            nx, ny, nz, penal: 3, preset: 'cantilever', xPhys, globalU: null, KE: KE_24x24,
+          });
+          sumMs += performance.now() - t0;
+          count++;
+        }
+        log(`Done: ${count} solves, avg ${(sumMs / count).toFixed(1)} ms/solve`);
+      }
+
+      run().catch((e) => { log('ERROR: ' + (e?.stack || e)); console.error(e); });
+    </script>
+  </body>
+</html>
