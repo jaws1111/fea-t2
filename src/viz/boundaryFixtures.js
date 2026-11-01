@@ -109,6 +109,20 @@ export function updateBoundaryFixtures(group, config) {
     return q;
   };
 
+  const orientTube = (mesh, f, cfg) => {
+    const axis = f.axis ?? 'z';
+    const n = axis === 'x' ? cfg.nx : axis === 'y' ? cfg.ny : cfg.nz;
+    mesh.quaternion.copy(axisQuat(axis));
+    if (f.rotation) {
+      const spin = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), f.rotation);
+      mesh.quaternion.multiply(spin);
+    }
+    const aMid = ((f.a0 ?? 0) + (f.a1 ?? n)) / 2 - n / 2;
+    if (axis === 'x') mesh.position.x += aMid;
+    else if (axis === 'y') mesh.position.y += aMid;
+    else mesh.position.z += aMid;
+  };
+
   for (const f of descriptors) {
     nodeToWorld(config, f.ix, f.iy, f.iz, p);
     switch (f.kind) {
@@ -199,13 +213,18 @@ export function updateBoundaryFixtures(group, config) {
         }
         break;
       case 'pressure': {
+        const cylH = Math.max(0.2, (f.a1 ?? 1) - (f.a0 ?? 0));
+        const cylR = Math.max(0.4, f.radius ?? 1);
         const geom =
           f.shape === 'box'
             ? new THREE.BoxGeometry(2 * (f.half?.x ?? 1), 2 * (f.half?.y ?? 1), 2 * (f.half?.z ?? 1))
-            : new THREE.SphereGeometry(Math.max(1, f.radius ?? 1), 16, 12);
+            : f.shape === 'cylinder'
+              ? new THREE.CylinderGeometry(cylR, cylR, cylH, 24)
+              : new THREE.SphereGeometry(Math.max(1, f.radius ?? 1), 16, 12);
         const m = addMesh(geom, cavityMat, p.x, p.y, p.z);
         m.castShadow = false;
         m.receiveShadow = false;
+        if (f.shape === 'cylinder') orientTube(m, f, config);
         // Locked wall around the cavity.
         if (f.cavity) {
           const w = f.wall ?? 2;
@@ -216,12 +235,49 @@ export function updateBoundaryFixtures(group, config) {
                   2 * ((f.half?.y ?? 1) + w),
                   2 * ((f.half?.z ?? 1) + w),
                 )
-              : new THREE.SphereGeometry(Math.max(1, f.radius ?? 1) + w, 16, 12);
+              : f.shape === 'cylinder'
+                ? new THREE.CylinderGeometry(cylR + w, cylR + w, cylH + 2 * w, 24)
+                : new THREE.SphereGeometry(Math.max(1, f.radius ?? 1) + w, 16, 12);
           const wm = addMesh(wallGeomShell, wallMat, p.x, p.y, p.z);
           wm.castShadow = false;
           wm.receiveShadow = false;
+          if (f.shape === 'cylinder') orientTube(wm, f, config);
         }
         if (!f.radial && f.dir) addDirArrow(p.x - f.dir.x * 0.2, p.y - f.dir.y * 0.2, p.z - f.dir.z * 0.2, f.dir);
+        break;
+      }
+      case 'shell': {
+        const R = Math.max(0.4, f.radiusOut ?? f.radius ?? 1);
+        const geom = f.profile === 'sphere'
+          ? new THREE.SphereGeometry(R, 20, 14)
+          : new THREE.CylinderGeometry(R, R, Math.max(0.2, (f.a1 ?? 1) - (f.a0 ?? 0)), f.profile === 'prism' ? Math.max(3, f.n ?? 6) : 24);
+        const m = addMesh(geom, wallMat, p.x, p.y, p.z);
+        m.castShadow = false;
+        if (f.profile !== 'sphere') orientTube(m, f, config);
+        break;
+      }
+      case 'ring': {
+        const geom = new THREE.TorusGeometry(Math.max(0.6, f.radius ?? 1), 0.18, 8, 28);
+        const m = addMesh(geom, pierMat, p.x, p.y, p.z);
+        m.castShadow = false;
+        if (f.axis === 'x') m.rotation.y = Math.PI / 2;
+        else if (f.axis === 'y') m.rotation.x = Math.PI / 2;
+        break;
+      }
+      case 'pad': {
+        const axis = f.axis ?? 'y';
+        const w = Math.max(0.4, f.w ?? 1);
+        const h = Math.max(0.4, f.h ?? 1);
+        const size = axis === 'x' ? [0.25, w, h] : axis === 'z' ? [w, h, 0.25] : [w, 0.25, h];
+        const geom = new THREE.BoxGeometry(size[0], size[1], size[2]);
+        const m = addMesh(geom, pierMat, p.x, p.y, p.z);
+        m.castShadow = false;
+        break;
+      }
+      case 'block': {
+        const geom = new THREE.BoxGeometry(2 * (f.half?.x ?? 1), 2 * (f.half?.y ?? 1), 2 * (f.half?.z ?? 1));
+        const m = addMesh(geom, f.void ? cavityMat : wallMat, p.x, p.y, p.z);
+        m.castShadow = false;
         break;
       }
       case 'road': {

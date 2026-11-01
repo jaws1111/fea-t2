@@ -338,3 +338,173 @@ export function forNodesOnFacePatch(nx, ny, nz, face, u, v, width, height, depth
   }
   return count;
 }
+
+/** @param {string} active @returns {'inner'|'outer'|'both'} */
+export function clampActive(active) {
+  return active === 'inner' || active === 'outer' || active === 'both' ? active : 'both';
+}
+
+/**
+ * Inner radius and outer radius in cells. `radiusNorm` is the inner radius as a
+ * fraction of max(nx,ny,nz). `wallCells` is the wall thickness in cells, at least 2,
+ * so the inner and outer surfaces do not share nodes.
+ */
+export function shellRadii(radiusNorm, wallCells, maxDim) {
+  const Rin = Math.max(1.5, (Number.isFinite(radiusNorm) ? Math.abs(radiusNorm) : 0.12) * maxDim);
+  const wall = Math.max(2, Math.min(12, Math.round(Number.isFinite(wallCells) ? wallCells : 2)));
+  return { Rin, Rout: Rin + wall, wall };
+}
+
+/** Regular polygon side count, clamped to 3..12. */
+export function clampSides(n) {
+  const s = Math.round(Number(n));
+  if (!Number.isFinite(s)) return 6;
+  return s < 3 ? 3 : s > 12 ? 12 : s;
+}
+
+/**
+ * Circumradius of the similar regular n-gon that passes through (u, v).
+ * Vertex 0 lies at angle `rotation` (radians) from +u. A point is inside the
+ * n-gon of circumradius R when this value is <= R.
+ */
+export function ngonMetric(u, v, n, rotation) {
+  const sides = clampSides(n);
+  const sector = (2 * Math.PI) / sides;
+  let a = Math.atan2(v, u) - (Number.isFinite(rotation) ? rotation : 0);
+  a -= sector * Math.floor(a / sector);
+  const delta = a - sector / 2;
+  const boundary = Math.cos(Math.PI / sides) / Math.cos(delta);
+  return Math.hypot(u, v) / boundary;
+}
+
+/**
+ * Nodes on an extruded radial surface (open tube). `metric(du, dv) <= R` is inside.
+ * The surface is extruded over element rows `e0..e1`; visited nodes run `e0..e1+1`.
+ * @param {(du: number, dv: number) => number} metric
+ * @param {(ix: number, iy: number, iz: number) => void} cb
+ */
+export function forOpenSurfaceNodes(nx, ny, nz, axis, i1, i2, n1, n2, e0, e1, R, metric, cb) {
+  const r = Math.ceil(R) + 2;
+  /** @type {[number, number][]} */
+  const ring = [];
+  for (let p2 = Math.max(0, i2 - r); p2 <= Math.min(n2, i2 + r); p2++) {
+    for (let p1 = Math.max(0, i1 - r); p1 <= Math.min(n1, i1 + r); p1++) {
+      let hasIn = false;
+      let hasOut = false;
+      for (let q2 = p2 - 1; q2 <= p2; q2++) {
+        if (q2 < 0 || q2 >= n2) continue;
+        for (let q1 = p1 - 1; q1 <= p1; q1++) {
+          if (q1 < 0 || q1 >= n1) continue;
+          if (metric(q1 + 0.5 - i1, q2 + 0.5 - i2) <= R) hasIn = true;
+          else hasOut = true;
+        }
+      }
+      if (hasIn && hasOut) ring.push([p1, p2]);
+    }
+  }
+  const nA = axis === 'x' ? nx : axis === 'y' ? ny : nz;
+  const a0 = Math.max(0, e0);
+  const a1 = Math.min(nA, e1 + 1);
+  const xyz = [0, 0, 0];
+  let count = 0;
+  for (let a = a0; a <= a1; a++) {
+    for (const [p1, p2] of ring) {
+      toXYZ(axis, p1, p2, a, xyz);
+      cb(xyz[0], xyz[1], xyz[2]);
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Nodes that touch both an element inside a closed surface and one outside it.
+ * `box` is an inclusive element-index range to search.
+ * @param {{ x0: number, x1: number, y0: number, y1: number, z0: number, z1: number }} box
+ * @param {(ex: number, ey: number, ez: number) => boolean} inside
+ * @param {(ix: number, iy: number, iz: number) => void} cb
+ */
+export function forClosedSurfaceNodes(nx, ny, nz, box, inside, cb) {
+  const x0 = Math.max(0, box.x0);
+  const y0 = Math.max(0, box.y0);
+  const z0 = Math.max(0, box.z0);
+  const x1 = Math.min(nx - 1, box.x1);
+  const y1 = Math.min(ny - 1, box.y1);
+  const z1 = Math.min(nz - 1, box.z1);
+  let count = 0;
+  for (let iz = z0; iz <= z1 + 1; iz++) {
+    for (let iy = y0; iy <= y1 + 1; iy++) {
+      for (let ix = x0; ix <= x1 + 1; ix++) {
+        let hasIn = false;
+        let hasOut = false;
+        for (let ez = iz - 1; ez <= iz; ez++) {
+          if (ez < 0 || ez >= nz) continue;
+          for (let ey = iy - 1; ey <= iy; ey++) {
+            if (ey < 0 || ey >= ny) continue;
+            for (let ex = ix - 1; ex <= ix; ex++) {
+              if (ex < 0 || ex >= nx) continue;
+              if (inside(ex, ey, ez)) hasIn = true;
+              else hasOut = true;
+            }
+          }
+        }
+        if (hasIn && hasOut) {
+          cb(ix, iy, iz);
+          count++;
+        }
+      }
+    }
+  }
+  return count;
+}
+
+/**
+ * Nodes on an interior axis-aligned plane patch. `width` / `height` are fractions
+ * of the two in-plane axes. `depth` is the number of node layers centred on the plane.
+ * @param {(ix: number, iy: number, iz: number, dist: number) => void} cb
+ */
+export function forNodesOnPlanePatch(nx, ny, nz, axis, x, y, z, width, height, depth, cb) {
+  const ax = axis === 'x' || axis === 'y' || axis === 'z' ? axis : 'y';
+  const dims = { x: nx, y: ny, z: nz };
+  const coord = { x, y, z };
+  const perp = ax === 'x' ? ['y', 'z'] : ax === 'y' ? ['x', 'z'] : ['x', 'y'];
+  const nU = dims[perp[0]];
+  const nV = dims[perp[1]];
+  const nA = dims[ax];
+  const plane = normToNode(coord[ax], nA);
+  const layers = Math.max(1, Math.round(Number.isFinite(depth) ? depth : 1));
+  const halfL = Math.floor((layers - 1) / 2);
+  let a0 = plane - halfL;
+  let a1 = a0 + layers - 1;
+  if (a0 < 0) {
+    a1 -= a0;
+    a0 = 0;
+  }
+  if (a1 > nA) {
+    a0 -= a1 - nA;
+    a1 = nA;
+  }
+  a0 = Math.max(0, a0);
+  a1 = Math.min(nA, a1);
+  const span = (c, w, n) => {
+    const half = Math.max(0, Number.isFinite(w) ? w : 0.2) / 2;
+    const centre = Number.isFinite(c) ? c : 0.5;
+    const lo = clamp(Math.round((centre - half) * n), 0, n);
+    const hi = clamp(Math.round((centre + half) * n), 0, n);
+    return [Math.min(lo, hi), Math.max(lo, hi)];
+  };
+  const [u0, u1] = span(coord[perp[0]], width, nU);
+  const [v0, v1] = span(coord[perp[1]], height, nV);
+  const xyz = [0, 0, 0];
+  let count = 0;
+  for (let a = a0; a <= a1; a++) {
+    for (let pv = v0; pv <= v1; pv++) {
+      for (let pu = u0; pu <= u1; pu++) {
+        toXYZ(ax, pu, pv, a, xyz);
+        cb(xyz[0], xyz[1], xyz[2], 0);
+        count++;
+      }
+    }
+  }
+  return count;
+}
