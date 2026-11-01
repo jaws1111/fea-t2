@@ -149,7 +149,11 @@ export function createSceneGizmoController({ scene, camera, domElement, controls
 
   function makeProxy(feature) {
     const roles = componentDef(feature.type)?.roles(feature) ?? { support: false, load: true };
-    const hex = roles.support ? (COLORS[feature.type] ?? COLORS.rest_point) : COLORS.force;
+    const hex = roles.support
+      ? (COLORS[feature.type] ?? COLORS.rest_point)
+      : roles.load
+        ? COLORS.force
+        : 0x94a3b8;
     const useCube = feature.type === 'wall_pad' || feature.type === 'pressure' || feature.type === 'point_load';
     const mesh = new THREE.Mesh(useCube ? geoms.cube : geoms.sphere, materialFor(hex));
     mesh.name = `gizmo-${feature.id}`;

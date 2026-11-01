@@ -4,6 +4,67 @@ import { sceneLoadCaseCount } from './pointLoad.js';
 import { resolveWorkingBounds } from './workingVolume.js';
 
 /**
+ * Rank of the rigid-body constraints implied by `fixedDofs`.
+ * A fixed translation at a node is one row of (Tx, Ty, Tz, Rx, Ry, Rz).
+ * Rank 6 means no free rigid motion.
+ */
+function supportRank(fixed, nx, ny, nz) {
+  const strideY = nx + 1;
+  const strideZ = strideY * (ny + 1);
+  const nNodes = strideZ * (nz + 1);
+  /** @type {number[]} */
+  const nodes = [];
+  let cx = 0;
+  let cy = 0;
+  let cz = 0;
+  for (let i = 0; i < nNodes; i++) {
+    const b = 3 * i;
+    if (!fixed[b] && !fixed[b + 1] && !fixed[b + 2]) continue;
+    const iz = Math.floor(i / strideZ);
+    const rem = i - iz * strideZ;
+    const iy = Math.floor(rem / strideY);
+    const ix = rem - iy * strideY;
+    nodes.push(ix, iy, iz, b);
+    cx += ix;
+    cy += iy;
+    cz += iz;
+  }
+  const n = nodes.length / 4;
+  if (!n) return 0;
+  cx /= n;
+  cy /= n;
+  cz /= n;
+  /** @type {number[][]} */
+  const basis = [];
+  const tol = 1e-5;
+  for (let k = 0; k < nodes.length; k += 4) {
+    const x = nodes[k] - cx;
+    const y = nodes[k + 1] - cy;
+    const z = nodes[k + 2] - cz;
+    const b = nodes[k + 3];
+    const rows = [];
+    if (fixed[b]) rows.push([1, 0, 0, 0, z, -y]);
+    if (fixed[b + 1]) rows.push([0, 1, 0, -z, 0, x]);
+    if (fixed[b + 2]) rows.push([0, 0, 1, y, -x, 0]);
+    for (const row of rows) {
+      for (const v of basis) {
+        let dot = 0;
+        for (let d = 0; d < 6; d++) dot += row[d] * v[d];
+        for (let d = 0; d < 6; d++) row[d] -= dot * v[d];
+      }
+      let norm = 0;
+      for (let d = 0; d < 6; d++) norm += row[d] * row[d];
+      norm = Math.sqrt(norm);
+      if (norm <= tol) continue;
+      for (let d = 0; d < 6; d++) row[d] /= norm;
+      basis.push(row);
+      if (basis.length === 6) return 6;
+    }
+  }
+  return basis.length;
+}
+
+/**
  * Dry-run the scene on throw-away arrays and report problems the user can fix:
  * missing supports/loads, load absorbed by fixed DOFs, loads outside the working volume.
  *
@@ -39,6 +100,9 @@ export function analyzeScene(scene, dims) {
     }
   }
   if (!res.fixedNodes) warnings.push('No supports: add a wall pad, rest point or clamped bolt hole.');
+  else if (supportRank(fixed, nx, ny, nz) < 6) {
+    warnings.push('Supports leave a rigid-body mode free.');
+  }
   if (!res.loadedNodes) warnings.push('No loads: add a point load, loaded bolt hole or pressure.');
   if (total > 0 && absorbedAbs / total > 0.05 && !warnings.some((w) => w.includes('absorbed'))) {
     warnings.push(

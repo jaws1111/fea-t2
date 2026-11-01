@@ -172,7 +172,8 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     const roles = componentDef(f.type)?.roles(f) ?? { support: false, load: false };
     if (roles.support && roles.load) return 'fix+load';
     if (roles.load) return 'load';
-    return 'fix';
+    if (roles.support) return 'fix';
+    return 'passive';
   }
 
   function rowFor(scene, f) {
@@ -189,7 +190,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
       meta = `${String(f.axis || 'z').toUpperCase()} line`;
     } else if (f.type === 'line_load' || f.type === 'face_load') {
       meta = `|F|=${Number(f.magnitude).toFixed(2)}`;
-    } else {
+    } else if (f.type === 'pressure' || f.type === 'point_load') {
       const extra =
         f.type === 'pressure'
           ? ` · ${f.pressureMode === 'directional' ? 'dir' : 'radial'}`
@@ -197,6 +198,12 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
             ? ` · ${pointLoadAxes(f)} axes`
             : '';
       meta = `|F|=${Number(f.magnitude).toFixed(2)}${extra}`;
+    } else if (f.type === 'rest_pad') {
+      meta = `${String(f.axis || 'y').toUpperCase()} pad`;
+    } else if (f.type === 'block') {
+      meta = f.void ? 'void' : 'solid';
+    } else if (Number.isFinite(f.radius)) {
+      meta = `r ${Number(f.radius).toFixed(2)}`;
     }
     const linked = linksOf(scene, f.id).length ? ' 🔗' : '';
     return { id: f.id, label: label + linked, meta, badge: badgeFor(f) };
@@ -233,7 +240,9 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
             ? 'bg-emerald-500/15 text-emerald-300'
             : r.badge === 'load'
               ? 'bg-rose-500/15 text-rose-300'
-              : 'bg-amber-500/15 text-amber-300';
+              : r.badge === 'passive'
+                ? 'bg-slate-500/20 text-slate-300'
+                : 'bg-amber-500/15 text-amber-300';
         return `<li class="scene-item ${active}" data-id="${r.id}" tabindex="0">
           <span class="flex min-w-0 items-center gap-1.5">
             <span class="shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${badgeCls}">${r.badge}</span>
@@ -403,14 +412,49 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     if (item.axes > 1 && pointLoadMode(item) === 'burst' && !(item.radius > 0.05)) item.radius = BURST_SPREAD;
   }
 
+  function shellInspector(item) {
+    let html = '';
+    if (item.type === 'surround') {
+      html += selectField('Shape', 'shape', item.shape, [['sphere', 'Sphere'], ['ngon', 'N-gon']]);
+    }
+    if (item.type === 'wall_prism' || item.shape === 'ngon') {
+      html += field('Sides', 'n', item.n ?? 6, 1, 3, 12);
+      html += field('Rotation', 'rotation', item.rotation ?? 0, 0.05, 0, 6.28);
+    }
+    if (item.type !== 'surround' || item.shape === 'ngon') {
+      html += selectField('Axis', 'axis', item.axis ?? 'z', [['x', 'X'], ['y', 'Y'], ['z', 'Z']]);
+      html += field('Length', 'len', item.len ?? 1, 0.05, 0.05, 1);
+    }
+    html += field('Radius', 'radius', item.radius, 0.01, 0.02, 0.5);
+    html += field('Wall (cells)', 'wall', item.wall ?? 2, 1, 2, 12);
+    html += selectField('Active', 'active', item.active ?? 'both', [
+      ['inner', 'Inner'],
+      ['outer', 'Outer'],
+      ['both', 'Both'],
+    ]);
+    html += checkField('Fix X', 'fixX', item.fixX !== false);
+    html += checkField('Fix Y', 'fixY', item.fixY !== false);
+    html += checkField('Fix Z', 'fixZ', item.fixZ !== false);
+    html += checkField('Solid', 'solid', item.solid !== false);
+    return html;
+  }
+
   function pressureInspector(item) {
     let html = '';
-    html += selectField('Shape', 'shape', item.shape, [['sphere', 'Sphere cavity'], ['box', 'Box cavity']], 1);
+    html += selectField('Shape', 'shape', item.shape, [
+      ['sphere', 'Sphere cavity'],
+      ['box', 'Box cavity'],
+      ['cylinder', 'Cylinder cavity'],
+    ], 1);
     html += selectField('Mode', 'pressureMode', item.pressureMode, [['radial', 'Radial'], ['directional', 'Directional']], 1);
     if (item.shape === 'box') {
       html += field('Half X', 'hx', item.hx, 0.01, 0.02, 0.5);
       html += field('Half Y', 'hy', item.hy, 0.01, 0.02, 0.5);
       html += field('Half Z', 'hz', item.hz, 0.01, 0.02, 0.5);
+    } else if (item.shape === 'cylinder') {
+      html += selectField('Axis', 'axis', item.axis ?? 'z', [['x', 'X'], ['y', 'Y'], ['z', 'Z']]);
+      html += field('Radius', 'radius', item.radius, 0.01, 0.02, 0.5);
+      html += field('Length', 'len', item.len ?? 0.5, 0.05, 0.05, 1);
     } else {
       html += field('Radius', 'radius', item.radius, 0.01, 0.02, 0.5);
     }
@@ -534,8 +578,31 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
       html += field('Magnitude', 'magnitude', item.magnitude, 0.1, -5, 5);
     } else if (item.type === 'pressure') {
       html += pressureInspector(item);
-    } else {
+    } else if (item.type === 'point_load') {
       html += pointLoadInspector(item);
+    } else if (item.type === 'wall_cylinder' || item.type === 'wall_prism' || item.type === 'surround') {
+      html += shellInspector(item);
+    } else if (item.type === 'rest_ring') {
+      html += selectField('Axis', 'axis', item.axis, [['x', 'X'], ['y', 'Y'], ['z', 'Z']]);
+      html += field('Radius', 'radius', item.radius, 0.01, 0.02, 0.5);
+      html += checkField('Fix X', 'fixX', item.fixX !== false);
+      html += checkField('Fix Y', 'fixY', item.fixY !== false);
+      html += checkField('Fix Z', 'fixZ', item.fixZ !== false);
+      html += checkField('Solid', 'solid', item.solid !== false);
+    } else if (item.type === 'rest_pad') {
+      html += selectField('Axis', 'axis', item.axis, [['x', 'X'], ['y', 'Y'], ['z', 'Z']]);
+      html += field('Width', 'width', item.width, 0.05, 0.05, 1);
+      html += field('Height', 'height', item.height, 0.05, 0.05, 1);
+      html += field('Depth (layers)', 'depth', item.depth, 1, 1, 6);
+      html += checkField('Fix X', 'fixX', item.fixX !== false);
+      html += checkField('Fix Y', 'fixY', item.fixY !== false);
+      html += checkField('Fix Z', 'fixZ', item.fixZ !== false);
+      html += checkField('Solid', 'solid', item.solid !== false);
+    } else if (item.type === 'block') {
+      html += field('Half X', 'hx', item.hx, 0.01, 0.02, 0.5);
+      html += field('Half Y', 'hy', item.hy, 0.01, 0.02, 0.5);
+      html += field('Half Z', 'hz', item.hz, 0.01, 0.02, 0.5);
+      html += checkField('Void', 'void', item.void === true);
     }
     html += linkSection(item);
 
