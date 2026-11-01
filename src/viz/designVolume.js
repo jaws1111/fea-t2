@@ -1,13 +1,12 @@
 import * as THREE from 'three';
-import { resolveWorkingBounds } from '../scene/workingVolume.js';
+import { resolveWorkingBounds, workingAxis, workingShape } from '../scene/workingVolume.js';
 
 /**
  * Translucent AABB for the FEA working / design volume.
  *
  * @param {THREE.Scene} scene
  */
-export function createDesignVolume(scene) {
-  const geometry = new THREE.BoxGeometry(1, 1, 1);
+function addEnvelope(parent, geometry, name) {
   const fill = new THREE.Mesh(
     geometry,
     new THREE.MeshBasicMaterial({
@@ -18,9 +17,8 @@ export function createDesignVolume(scene) {
       side: THREE.DoubleSide,
     }),
   );
-  fill.name = 'designVolumeFill';
+  fill.name = `${name}Fill`;
   fill.renderOrder = -2;
-
   const edges = new THREE.LineSegments(
     new THREE.EdgesGeometry(geometry),
     new THREE.LineBasicMaterial({
@@ -30,17 +28,30 @@ export function createDesignVolume(scene) {
       depthWrite: false,
     }),
   );
-  edges.name = 'designVolumeEdges';
+  edges.name = `${name}Edges`;
   edges.renderOrder = -1;
+  const holder = new THREE.Group();
+  holder.name = name;
+  holder.add(fill);
+  holder.add(edges);
+  holder.visible = false;
+  parent.add(holder);
+  return { holder, fill, edges, geometry };
+}
 
+export function createDesignVolume(scene) {
   const group = new THREE.Group();
   group.name = 'designVolume';
-  group.add(fill);
-  group.add(edges);
+  const shapes = {
+    box: addEnvelope(group, new THREE.BoxGeometry(1, 1, 1), 'designVolumeBox'),
+    sphere: addEnvelope(group, new THREE.SphereGeometry(0.5, 24, 16), 'designVolumeSphere'),
+    cylinder: addEnvelope(group, new THREE.CylinderGeometry(0.5, 0.5, 1, 24, 1), 'designVolumeCylinder'),
+  };
   group.visible = false;
   scene.add(group);
-
-  return { group, fill, edges };
+  const solids = [shapes.box.fill, shapes.sphere.fill, shapes.cylinder.fill];
+  const wires = [shapes.box.edges, shapes.sphere.edges, shapes.cylinder.edges];
+  return { group, fill: shapes.box.fill, edges: shapes.box.edges, shapes, solids, wires };
 }
 
 /**
@@ -59,12 +70,36 @@ export function updateDesignVolume(api, dims, boundsOverride = null) {
   const sx = Math.max(0.05, (b.x1 - b.x0) * nx);
   const sy = Math.max(0.05, (b.y1 - b.y0) * ny);
   const sz = Math.max(0.05, (b.z1 - b.z0) * nz);
-  // BoxGeometry is centred; place centre of the normalized AABB in world coords.
   const cx = ((b.x0 + b.x1) / 2) * nx - nx / 2;
   const cy = ((b.y0 + b.y1) / 2) * ny - ny / 2;
   const cz = ((b.z0 + b.z1) / 2) * nz - nz / 2;
-  api.group.scale.set(sx, sy, sz);
+  api.group.scale.set(1, 1, 1);
   api.group.position.set(cx, cy, cz);
+
+  const kind = workingShape(dims.scene ?? null);
+  const axis = workingAxis(dims.scene ?? null);
+  for (const key of ['box', 'sphere', 'cylinder']) {
+    const part = api.shapes?.[key];
+    if (!part) continue;
+    part.holder.visible = key === kind;
+    part.holder.rotation.set(0, 0, 0);
+    part.holder.scale.set(1, 1, 1);
+  }
+  if (kind === 'sphere') {
+    const d = Math.min(sx, sy, sz);
+    api.shapes.sphere.holder.scale.set(d, d, d);
+  } else if (kind === 'cylinder') {
+    const len = axis === 'x' ? sx : axis === 'y' ? sy : sz;
+    const dia = axis === 'x' ? Math.min(sy, sz) : axis === 'y' ? Math.min(sx, sz) : Math.min(sx, sy);
+    const holder = api.shapes.cylinder.holder;
+    holder.scale.set(dia, len, dia);
+    if (axis === 'x') holder.rotation.set(0, 0, -Math.PI / 2);
+    else if (axis === 'z') holder.rotation.set(Math.PI / 2, 0, 0);
+  } else {
+    api.shapes.box.holder.scale.set(sx, sy, sz);
+  }
+  api.fill = api.shapes[kind].fill;
+  api.edges = api.shapes[kind].edges;
 }
 
 /**
@@ -81,8 +116,11 @@ export function setDesignVolumeVisible(api, visible) {
 export function disposeDesignVolume(api) {
   if (!api) return;
   api.group?.parent?.remove(api.group);
-  api.fill?.geometry?.dispose();
-  api.fill?.material?.dispose();
-  api.edges?.geometry?.dispose();
-  api.edges?.material?.dispose();
+  const parts = api.shapes ? Object.values(api.shapes) : [];
+  for (const part of parts) {
+    part.geometry?.dispose();
+    part.fill?.material?.dispose();
+    part.edges?.geometry?.dispose();
+    part.edges?.material?.dispose();
+  }
 }

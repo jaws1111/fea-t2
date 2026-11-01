@@ -1,15 +1,20 @@
 /**
- * Working / design volume — the AABB of elements the optimizer may fill.
- * Outside the volume is permanent void (non-design space).
+ * Working / design volume — the region the optimizer may fill.
+ * Outside it is permanent void (non-design space).
  *
+ * `bounds` is always an axis-aligned box. A sphere or cylinder is the largest one
+ * inscribed in that box, so domain fit and the corner handles keep editing a box.
  * Coordinates are normalized [0,1] over the FEA domain. Auto mode needs the grid
  * dims because feature sizes (hole radius, cavity radius, wall) are in CELLS:
  * radius is a fraction of max(nx, ny, nz), not of each axis.
  */
 
 import { componentDef, orderedFeatures } from './components/index.js';
+import { inscribedVolume, pointInInscribed } from './geometry.js';
 
 /** @typedef {'full'|'auto'|'manual'} WorkingVolumeMode */
+/** @typedef {'box'|'sphere'|'cylinder'} WorkingVolumeShape */
+/** @typedef {'x'|'y'|'z'} VolumeAxis */
 
 /**
  * @typedef {Object} WorkingBounds
@@ -20,14 +25,37 @@ import { componentDef, orderedFeatures } from './components/index.js';
 
 /**
  * @typedef {Object} WorkingVolume
- * @property {'box'} shape
+ * @property {WorkingVolumeShape} shape
  * @property {WorkingVolumeMode} mode
- * @property {number} padding   auto-mode margin as fraction of domain
+ * @property {number} padding   auto-mode margin as a fraction of each domain axis
  * @property {WorkingBounds} bounds
+ * @property {VolumeAxis} [axis]  cylinder axis. Ignored for a box or a sphere
  */
 
 const FULL = Object.freeze({ x0: 0, x1: 1, y0: 0, y1: 1, z0: 0, z1: 1 });
 const DEFAULT_DIMS = Object.freeze({ nx: 32, ny: 32, nz: 32 });
+
+/** @param {import('./types.js').Scene | { shape?: string, axis?: string } | null | undefined} scene */
+export function workingShape(scene) {
+  const s = scene?.workingVolume?.shape ?? scene?.shape;
+  return s === 'sphere' || s === 'cylinder' ? s : 'box';
+}
+
+/** @param {import('./types.js').Scene | { shape?: string, axis?: string } | null | undefined} scene */
+export function workingAxis(scene) {
+  const a = scene?.workingVolume?.axis ?? scene?.axis;
+  return a === 'x' || a === 'y' ? a : 'z';
+}
+
+/**
+ * Repair shape and cylinder axis on a volume that came from the editor or a file.
+ * @param {WorkingVolume} wv
+ */
+export function normalizeWorkingShape(wv) {
+  if (!wv) return;
+  if (wv.shape !== 'sphere' && wv.shape !== 'cylinder') wv.shape = 'box';
+  if (wv.shape === 'cylinder' && wv.axis !== 'x' && wv.axis !== 'y' && wv.axis !== 'z') wv.axis = 'z';
+}
 
 /** @returns {WorkingVolume} */
 export function createDefaultWorkingVolume() {
@@ -86,6 +114,8 @@ function addBox(b, dims, cx, cy, cz, hxC0, hyC0, hzC0, grows = false) {
  * @returns {WorkingBounds}
  */
 export function computeAutoWorkingBounds(scene, padding = 0.06, dims = DEFAULT_DIMS, opts = {}) {
+  const shape = workingShape(scene);
+  if (shape !== 'box') return computeAutoShapeBounds(scene, shape, padding, dims, opts);
   const feats = orderedFeatures(scene).filter(Boolean);
   if (!feats.length) return { ...FULL };
 
@@ -172,6 +202,143 @@ export function resolveFitBounds(scene, dims = DEFAULT_DIMS) {
 }
 
 /**
+ * Bounds plus the shape fields hole clipping reads. The cached `bounds` on the scene stay a plain box.
+ * @param {import('./types.js').Scene | null | undefined} scene
+ * @param {{ nx: number, ny: number, nz: number }} [dims]
+ */
+export function attachVolume(scene, dims = DEFAULT_DIMS) {
+  const bounds = resolveWorkingBounds(scene, dims);
+  return {
+    ...bounds,
+    volumeShape: workingShape(scene),
+    volumeAxis: workingAxis(scene),
+    volumeDims: dims,
+  };
+}
+
+/**
+ * True when element (ex, ey, ez) may be designed. A box uses the same index window as the
+ * outside-void loop. A sphere or cylinder uses the element centre against the inscribed shape.
+ */
+export function elementInsideWorkingVolume(ex, ey, ez, dims, bounds, shape, axis) {
+  if (shape !== 'sphere' && shape !== 'cylinder') {
+    const { nx, ny, nz } = dims;
+    const ex0 = Math.floor(bounds.x0 * nx);
+    const ex1 = Math.ceil(bounds.x1 * nx) - 1;
+    const ey0 = Math.floor(bounds.y0 * ny);
+    const ey1 = Math.ceil(bounds.y1 * ny) - 1;
+    const ez0 = Math.floor(bounds.z0 * nz);
+    const ez1 = Math.ceil(bounds.z1 * nz) - 1;
+    return ex >= ex0 && ex <= ex1 && ey >= ey0 && ey <= ey1 && ez >= ez0 && ez <= ez1;
+  }
+  const metric = inscribedVolume(bounds, dims, shape, axis);
+  return pointInInscribed(ex + 0.5, ey + 0.5, ez + 0.5, metric);
+}
+
+/**
+ * Ids of components whose extent box is not inside the inscribed shape.
+ * A box volume reports nothing here. Hole clipping already warns for those.
+ * @returns {string[]}
+ */
+export function componentsOutsideVolume(scene, dims = DEFAULT_DIMS) {
+  const shape = workingShape(scene);
+  if (shape === 'box') return [];
+  const bounds = resolveWorkingBounds(scene, dims);
+  const axis = workingAxis(scene);
+  const metric = inscribedVolume(bounds, dims, shape, axis);
+  /** @type {string[]} */
+  const ids = [];
+  for (const c of orderedFeatures(scene)) {
+    if (!c) continue;
+    const box = componentDef(c.type)?.extent?.(c, dims);
+    if (!box) continue;
+    const cx = box.cx * dims.nx;
+    const cy = box.cy * dims.ny;
+    const cz = box.cz * dims.nz;
+    let inside = true;
+    for (const sx of [-1, 1]) {
+      for (const sy of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          if (!pointInInscribed(cx + sx * box.hx, cy + sy * box.hy, cz + sz * box.hz, metric)) inside = false;
+        }
+      }
+    }
+    if (!inside) ids.push(c.id);
+  }
+  return ids;
+}
+
+/**
+ * Auto box around a sphere or cylinder that contains every feature extent.
+ * The sphere's radius is half the diagonal of the feature boxes, so every corner is inside.
+ * Padding then grows each side by that fraction of the axis, the same margin a box uses.
+ */
+function computeAutoShapeBounds(scene, shape, padding, dims, opts) {
+  const lo = { x: Infinity, y: Infinity, z: Infinity };
+  const hi = { x: -Infinity, y: -Infinity, z: -Infinity };
+  let any = false;
+  for (const f of orderedFeatures(scene)) {
+    if (!f) continue;
+    const box = componentDef(f.type)?.extent?.(f, dims);
+    if (!box) continue;
+    any = true;
+    const c = { x: box.cx * dims.nx, y: box.cy * dims.ny, z: box.cz * dims.nz };
+    const h = {
+      x: box.hx + AUTO_SAFETY_CELLS,
+      y: box.hy + AUTO_SAFETY_CELLS,
+      z: box.hz + AUTO_SAFETY_CELLS,
+    };
+    for (const k of ['x', 'y', 'z']) {
+      lo[k] = Math.min(lo[k], c[k] - h[k]);
+      hi[k] = Math.max(hi[k], c[k] + h[k]);
+    }
+  }
+  if (!any) return { ...FULL };
+
+  const mid = { x: (lo.x + hi.x) / 2, y: (lo.y + hi.y) / 2, z: (lo.z + hi.z) / 2 };
+  const size = { x: hi.x - lo.x, y: hi.y - lo.y, z: hi.z - lo.z };
+  const fitLo = { x: mid.x, y: mid.y, z: mid.z };
+  const fitHi = { x: mid.x, y: mid.y, z: mid.z };
+  if (shape === 'cylinder') {
+    const a = workingAxis(scene);
+    const [p, q] = a === 'x' ? ['y', 'z'] : a === 'y' ? ['x', 'z'] : ['x', 'y'];
+    const radius = 0.5 * Math.hypot(size[p], size[q]);
+    fitLo[p] = mid[p] - radius;
+    fitHi[p] = mid[p] + radius;
+    fitLo[q] = mid[q] - radius;
+    fitHi[q] = mid[q] + radius;
+    fitLo[a] = lo[a];
+    fitHi[a] = hi[a];
+  } else {
+    const radius = 0.5 * Math.hypot(size.x, size.y, size.z);
+    for (const k of ['x', 'y', 'z']) {
+      fitLo[k] = mid[k] - radius;
+      fitHi[k] = mid[k] + radius;
+    }
+  }
+
+  const pad = Math.max(0, padding);
+  const n = { x: dims.nx, y: dims.ny, z: dims.nz };
+  /** @type {WorkingBounds} */
+  const out = { x0: 0, x1: 1, y0: 0, y1: 1, z0: 0, z1: 1 };
+  for (const k of ['x', 'y', 'z']) {
+    let a = fitLo[k] - pad * n[k];
+    let b = fitHi[k] + pad * n[k];
+    if (!opts.grow) {
+      a = Math.max(0, a);
+      b = Math.min(n[k], b);
+    }
+    if (!(b > a)) {
+      a = 0;
+      b = n[k];
+    }
+    out[`${k}0`] = a / n[k];
+    out[`${k}1`] = b / n[k];
+  }
+  return out;
+}
+
+/**
  * Effective working bounds for a scene on a given grid.
  * @param {import('./types.js').Scene | null | undefined} scene
  * @param {{ nx: number, ny: number, nz: number }} [dims]
@@ -241,7 +408,7 @@ export function sanitizeFreeBounds(b) {
 export function ensureWorkingVolume(scene, dims = DEFAULT_DIMS) {
   if (!scene.workingVolume) scene.workingVolume = createDefaultWorkingVolume();
   const wv = scene.workingVolume;
-  if (!wv.shape) wv.shape = 'box';
+  normalizeWorkingShape(wv);
   if (wv.mode !== 'full' && wv.mode !== 'auto' && wv.mode !== 'manual') wv.mode = 'auto';
   if (!Number.isFinite(wv.padding)) wv.padding = 0.06;
   if (wv.mode === 'auto') wv.bounds = computeAutoWorkingBounds(scene, wv.padding, dims);

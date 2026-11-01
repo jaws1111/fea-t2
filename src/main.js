@@ -268,11 +268,13 @@ ui = bindAll({
     hideBody = onScene;
     applyBodyVisibility();
     // Brighter envelope while editing BCs; keep a faint ghost on Optimize.
-    if (designVolume.fill?.material) {
-      designVolume.fill.material.opacity = onScene ? 0.1 : 0.045;
+    const fillOpacity = onScene ? 0.1 : 0.045;
+    const edgeOpacity = onScene ? 0.55 : 0.28;
+    for (const mesh of designVolume.solids ?? [designVolume.fill]) {
+      if (mesh?.material) mesh.material.opacity = fillOpacity;
     }
-    if (designVolume.edges?.material) {
-      designVolume.edges.material.opacity = onScene ? 0.55 : 0.28;
+    for (const line of designVolume.wires ?? [designVolume.edges]) {
+      if (line?.material) line.material.opacity = edgeOpacity;
     }
     updateDesignVolume(designVolume, config);
     setDesignVolumeVisible(designVolume, true);

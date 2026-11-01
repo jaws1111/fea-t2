@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import { inscribedVolume, pointInInscribed } from '../scene/geometry.js';
 import { resolveWorkingBounds } from '../scene/workingVolume.js';
 
 /** Thinnest box the user can drag to (normalized). */
@@ -15,7 +16,8 @@ const KEYS = ['x', 'y', 'z'];
  *
  * Selecting a corner shows a translate gizmo; dragging it moves the three box sides that meet
  * there. The box may leave the current domain (the domain is re-fitted on release). It can never
- * exclude the anchor point of a scene object. On release `onCommit(bounds)` receives the new
+ * exclude the anchor point of a scene object. A sphere or cylinder is inscribed in the box, so a
+ * drag that would leave an anchor outside that shape is ignored. On release `onCommit(bounds)` receives the new
  * box in normalized coordinates of the CURRENT domain (values may lie outside [0,1]).
  *
  * @param {{
@@ -119,6 +121,24 @@ export function createVolumeGizmo({ scene, camera, domElement, controls, getConf
     return r;
   }
 
+  function shapeHoldsAnchors(bounds) {
+    const cfg = getConfig();
+    const shape = cfg.scene?.workingVolume?.shape;
+    if (shape !== 'sphere' && shape !== 'cylinder') return true;
+    const d = dims();
+    const metric = inscribedVolume(bounds, d, shape, cfg.scene.workingVolume.axis);
+    for (const f of cfg.scene?.components ?? []) {
+      if (!f) continue;
+      const p = { x: Number(f.x), y: Number(f.y), z: Number(f.z) };
+      if (f.type === 'wall_pad' && typeof f.face === 'string' && f.face.length >= 2) {
+        p[f.face[0]] = f.face[1] === '+' ? 1 : 0;
+      }
+      if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
+      if (!pointInInscribed(p.x * d.nx, p.y * d.ny, p.z * d.nz, metric)) return false;
+    }
+    return true;
+  }
+
   function placeCorners(b) {
     const d = dims();
     for (let i = 0; i < 8; i++) {
@@ -199,6 +219,7 @@ export function createVolumeGizmo({ scene, camera, domElement, controls, getConf
     const d = dims();
     const n = nOf(d);
     if (!cur) cur = idleBounds();
+    const prev = { ...cur };
     const anchors = anchorRange();
     const high = [selected & 1, selected & 2, selected & 4];
     KEYS.forEach((k, a) => {
@@ -217,6 +238,7 @@ export function createVolumeGizmo({ scene, camera, domElement, controls, getConf
         cur[lo] = v;
       }
     });
+    if (!shapeHoldsAnchors(cur)) Object.assign(cur, prev);
     // Write the constrained corner back so the handle can't leave the allowed range.
     placeCorners(cur);
     onPreview?.({ ...cur });

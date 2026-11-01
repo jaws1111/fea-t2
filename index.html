@@ -328,9 +328,14 @@
         <div class="space-y-1.5 rounded-lg border border-slate-800 bg-slate-900/40 p-2">
           <div class="section-label">Working volume</div>
           <div class="grid grid-cols-3 gap-1">
-            <button id="wv-mode-full" class="btn-secondary !py-1 text-[10px]" type="button" data-wv-mode="full" title="Entire FEA domain">Full</button>
-            <button id="wv-mode-auto" class="btn-secondary !py-1 text-[10px]" type="button" data-wv-mode="auto" title="Fit AABB around supports &amp; loads">Auto</button>
-            <button id="wv-mode-manual" class="btn-secondary !py-1 text-[10px]" type="button" data-wv-mode="manual" title="Edit bounds manually">Manual</button>
+            <button id="wv-shape-box" class="btn-secondary !py-1 text-[10px]" type="button" aria-pressed="true" title="Designable box">Box</button>
+            <button id="wv-shape-sphere" class="btn-secondary !py-1 text-[10px]" type="button" aria-pressed="false" title="Largest sphere inside the box">Sphere</button>
+            <button id="wv-shape-cylinder" class="btn-secondary !py-1 text-[10px]" type="button" aria-pressed="false" title="Largest cylinder inside the box">Cylinder</button>
+          </div>
+          <div class="grid grid-cols-3 gap-1">
+            <button id="wv-mode-full" class="btn-secondary !py-1 text-[10px]" type="button" data-wv-mode="full" title="Shape fills the FEA domain">Full</button>
+            <button id="wv-mode-auto" class="btn-secondary !py-1 text-[10px]" type="button" data-wv-mode="auto" title="Fit the shape around supports and loads, plus margin">Auto</button>
+            <button id="wv-mode-manual" class="btn-secondary !py-1 text-[10px]" type="button" data-wv-mode="manual" title="Edit the box by hand">Manual</button>
           </div>
           <p id="wv-hint" class="text-[10px] leading-snug text-slate-500">Auto fits a box around scene objects (+ padding).</p>
           <div id="wv-size" class="whitespace-pre-line font-mono text-[10px] text-slate-500"></div>
@@ -345,6 +350,13 @@
           <div class="flex items-center gap-2 text-[10px] text-slate-400">
             <label class="flex items-center gap-1">Pad
               <input id="wv-padding" type="number" min="0" max="1" step="0.01" value="0.1" class="w-14 rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" />
+            </label>
+            <label id="wv-axis-wrap" class="hidden items-center gap-1">Axis
+              <select id="wv-axis" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200">
+                <option value="x">X</option>
+                <option value="y">Y</option>
+                <option value="z">Z</option>
+              </select>
             </label>
             <button id="btn-wv-refit" class="text-indigo-300 hover:text-indigo-200" type="button" title="Recompute the box around all objects (+ padding)">Refit auto</button>
             <button id="btn-wv-fit" class="ml-auto text-emerald-300 hover:text-emerald-200" type="button" title="Crop the FEA domain to this box: grid proportions = working-volume proportions, no wasted void cells">Fit domain</button>

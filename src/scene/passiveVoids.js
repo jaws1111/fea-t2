@@ -1,5 +1,5 @@
 import { componentDef, orderedFeatures } from './components/index.js';
-import { resolveWorkingBounds } from './workingVolume.js';
+import { attachVolume, elementInsideWorkingVolume } from './workingVolume.js';
 
 /**
  * Per-element passive mask:
@@ -25,7 +25,7 @@ export function buildPassiveMask(nx, ny, nz, scene) {
   let any = false;
   const E = (ex, ey, ez) => ex + nx * (ey + ny * ez);
 
-  const wb = resolveWorkingBounds(scene, dims);
+  const wb = attachVolume(scene, dims);
   const list = orderedFeatures(scene);
   const ctx = { solid, voidm, dims, maxDim, wb, E, any: false };
   for (const c of list) componentDef(c?.type)?.paintSolid?.(c, ctx);
@@ -33,21 +33,17 @@ export function buildPassiveMask(nx, ny, nz, scene) {
   any = ctx.any;
 
   // Outside the working volume: permanent void.
-  const full =
+  // A box that already fills the domain paints nothing, matching the old mask.
+  const shape = wb.volumeShape;
+  const boxFull =
     wb.x0 <= 1e-9 && wb.x1 >= 1 - 1e-9 &&
     wb.y0 <= 1e-9 && wb.y1 >= 1 - 1e-9 &&
     wb.z0 <= 1e-9 && wb.z1 >= 1 - 1e-9;
-  if (!full) {
-    const ex0 = Math.max(0, Math.floor(wb.x0 * nx));
-    const ex1 = Math.min(nx - 1, Math.ceil(wb.x1 * nx) - 1);
-    const ey0 = Math.max(0, Math.floor(wb.y0 * ny));
-    const ey1 = Math.min(ny - 1, Math.ceil(wb.y1 * ny) - 1);
-    const ez0 = Math.max(0, Math.floor(wb.z0 * nz));
-    const ez1 = Math.min(nz - 1, Math.ceil(wb.z1 * nz) - 1);
+  if (!(shape === 'box' && boxFull)) {
     for (let ez = 0; ez < nz; ez++) {
       for (let ey = 0; ey < ny; ey++) {
         for (let ex = 0; ex < nx; ex++) {
-          if (ex < ex0 || ex > ex1 || ey < ey0 || ey > ey1 || ez < ez0 || ez > ez1) {
+          if (!elementInsideWorkingVolume(ex, ey, ez, dims, wb, shape, wb.volumeAxis)) {
             voidm[E(ex, ey, ez)] = 1;
             any = true;
           }

@@ -1,7 +1,7 @@
 import { getNodeIndex } from '../fea/indexing.js';
 import { componentDef, orderedFeatures } from './components/index.js';
 import { sceneLoadCaseCount } from './pointLoad.js';
-import { resolveWorkingBounds } from './workingVolume.js';
+import { attachVolume, componentsOutsideVolume } from './workingVolume.js';
 
 /**
  * Rank of the rigid-body constraints implied by `fixedDofs`.
@@ -104,6 +104,10 @@ export function analyzeScene(scene, dims) {
     warnings.push('Supports leave a rigid-body mode free.');
   }
   if (!res.loadedNodes) warnings.push('No loads: add a point load, loaded bolt hole or pressure.');
+  for (const id of componentsOutsideVolume(scene, dims)) {
+    if (warnings.some((w) => w.includes(id) && w.includes('outside'))) continue;
+    warnings.push(`${id} sits outside the working volume.`);
+  }
   if (total > 0 && absorbedAbs / total > 0.05 && !warnings.some((w) => w.includes('absorbed'))) {
     warnings.push(
       `${Math.round((100 * absorbedAbs) / total)}% of the load lands on fixed DOFs and is absorbed by the support.`,
@@ -143,7 +147,7 @@ export function applyCustomBCs(fixedDofs, F, nx, ny, nz, scene, loadCase = 0) {
     F,
     dims,
     maxDim: Math.max(nx, ny, nz),
-    wb: resolveWorkingBounds(scene, dims),
+    wb: attachVolume(scene, dims),
     idx: (ix, iy, iz) => getNodeIndex(nx, ny, nz, ix, iy, iz),
     loadCase,
     warnings,

@@ -802,19 +802,40 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
   function renderWorkingVolumeUI() {
     const scene = ensureScene();
     const wv = ensureWorkingVolume(scene, dims());
+    const shape = wv.shape === 'sphere' || wv.shape === 'cylinder' ? wv.shape : 'box';
+    for (const name of ['box', 'sphere', 'cylinder']) {
+      const btn = $(`wv-shape-${name}`);
+      btn?.classList.toggle('is-active', shape === name);
+      btn?.setAttribute('aria-pressed', String(shape === name));
+    }
     for (const mode of ['full', 'auto', 'manual']) {
       const btn = $(`wv-mode-${mode}`);
       btn?.classList.toggle('is-active', wv.mode === mode);
       btn?.setAttribute('aria-pressed', String(wv.mode === mode));
     }
+    const axisWrap = $('wv-axis-wrap');
+    axisWrap?.classList.toggle('hidden', shape !== 'cylinder');
+    if (shape === 'cylinder') axisWrap?.classList.add('flex');
+    else axisWrap?.classList.remove('flex');
+    const axisEl = $('wv-axis');
+    if (axisEl && document.activeElement !== axisEl) {
+      axisEl.value = wv.axis === 'x' || wv.axis === 'y' ? wv.axis : 'z';
+    }
     const hint = $('wv-hint');
     if (hint) {
+      const noun = shape === 'sphere' ? 'sphere' : shape === 'cylinder' ? 'cylinder' : 'box';
       hint.textContent =
         wv.mode === 'full'
-          ? 'Entire FEA domain is designable.'
+          ? shape === 'box'
+            ? 'Entire FEA domain is designable.'
+            : `The largest ${noun} inside the domain is designable. Outside it is void.`
           : wv.mode === 'auto'
-            ? 'Box fitted to holes (boss + span), pressure cavity + wall, pads, rests and loads (+ pad).'
-            : 'Manual box (0–1 of the domain). Outside = void.';
+            ? shape === 'box'
+              ? 'Box fitted to holes (boss + span), pressure cavity + wall, pads, rests and loads (+ pad).'
+              : `Auto fits a ${noun} around the objects, then adds the margin.`
+            : shape === 'box'
+              ? 'Manual box (0–1 of the domain). Outside = void.'
+              : `Manual box. The ${noun} is the largest one that fits inside it. Outside it is void.`;
       hint.textContent += ' Drag the corner handles in the viewport: on release the box is meshed with cubic voxels (cell count from Voxel Domain).';
     }
     const b = wv.bounds;
@@ -837,7 +858,17 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
       const cx = (b.x1 - b.x0) * config.nx;
       const cy = (b.y1 - b.y0) * config.ny;
       const cz = (b.z1 - b.z0) * config.nz;
-      size.textContent = `${cx.toFixed(1)} × ${cy.toFixed(1)} × ${cz.toFixed(1)} cells of ${config.nx} × ${config.ny} × ${config.nz}`;
+      if (shape === 'sphere') {
+        const d = Math.min(cx, cy, cz);
+        size.textContent = `Sphere Ø ${d.toFixed(1)} cells, inside ${cx.toFixed(1)} × ${cy.toFixed(1)} × ${cz.toFixed(1)}`;
+      } else if (shape === 'cylinder') {
+        const axis = wv.axis === 'x' || wv.axis === 'y' ? wv.axis : 'z';
+        const len = axis === 'x' ? cx : axis === 'y' ? cy : cz;
+        const dia = axis === 'x' ? Math.min(cy, cz) : axis === 'y' ? Math.min(cx, cz) : Math.min(cx, cy);
+        size.textContent = `Cylinder Ø ${dia.toFixed(1)} × ${len.toFixed(1)} along ${axis.toUpperCase()}`;
+      } else {
+        size.textContent = `${cx.toFixed(1)} × ${cy.toFixed(1)} × ${cz.toFixed(1)} cells of ${config.nx} × ${config.ny} × ${config.nz}`;
+      }
       // A cavity + wall bigger than the domain gets clipped by the domain edge: say so.
       const over = pressureOverflowCells(config.scene, { nx: config.nx, ny: config.ny, nz: config.nz });
       size.classList.toggle('text-amber-400', !!over);
@@ -859,6 +890,29 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     else wv.bounds = sanitizeBounds(wv.bounds);
     notify(false);
   }
+
+  function setWorkingShape(shape) {
+    pushUndo();
+    const scene = ensureScene();
+    const wv = ensureWorkingVolume(scene, dims());
+    wv.shape = shape;
+    if (shape === 'cylinder' && wv.axis !== 'x' && wv.axis !== 'y' && wv.axis !== 'z') wv.axis = 'z';
+    if (wv.mode === 'auto') wv.bounds = computeAutoWorkingBounds(scene, wv.padding ?? 0.06, dims());
+    notify(false);
+  }
+
+  on($('wv-shape-box'), 'click', () => setWorkingShape('box'));
+  on($('wv-shape-sphere'), 'click', () => setWorkingShape('sphere'));
+  on($('wv-shape-cylinder'), 'click', () => setWorkingShape('cylinder'));
+  on($('wv-axis'), 'change', (e) => {
+    pushUndo();
+    const scene = ensureScene();
+    const wv = ensureWorkingVolume(scene, dims());
+    wv.shape = 'cylinder';
+    wv.axis = e.target.value === 'x' || e.target.value === 'y' ? e.target.value : 'z';
+    if (wv.mode === 'auto') wv.bounds = computeAutoWorkingBounds(scene, wv.padding ?? 0.06, dims());
+    notify(false);
+  });
 
   on($('wv-mode-full'), 'click', () => setWorkingMode('full'));
   on($('wv-mode-auto'), 'click', () => setWorkingMode('auto'));

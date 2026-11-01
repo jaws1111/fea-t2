@@ -8,7 +8,7 @@ import { SCENE_EXAMPLES } from '../src/scene/templates.js';
 import { createComponent, createLoadedHole, createEmptyScene, normalizeScene } from '../src/scene/types.js';
 import { resolveWorkingBounds, resolveFitBounds, pressureOverflowCells } from '../src/scene/workingVolume.js';
 import { buildPassiveMask } from '../src/scene/passiveVoids.js';
-import { applyCustomBCs } from '../src/scene/applyCustomBCs.js';
+import { analyzeScene, applyCustomBCs } from '../src/scene/applyCustomBCs.js';
 import { cropSceneToWorkingVolume, fitDimsForBudget, fitGridForBounds, fitGridForScene, workingVolumeSize } from '../src/scene/domainFit.js';
 import { buildSmoothMesh } from '../src/viz/smoothMeshCore.js';
 
@@ -185,6 +185,152 @@ console.log('3. Smooth-body Deform moves the mesh');
   let same = true;
   for (let i = 0; i < a.positions.length; i++) if (a.positions[i] !== c.positions[i]) same = false;
   check(same, 'Deform 0 leaves the mesh untouched');
+}
+
+console.log('4. Sphere and cylinder working volumes');
+const FULL_B = { x0: 0, x1: 1, y0: 0, y1: 1, z0: 0, z1: 1 };
+const cellAt = (mask, nx, ny, x, y, z) => mask[x + nx * (y + ny * z)];
+
+function designableCells(scene, dims) {
+  const mask = buildPassiveMask(dims.nx, dims.ny, dims.nz, scene);
+  if (!mask) return dims.nx * dims.ny * dims.nz;
+  let n = 0;
+  for (const v of mask) if (v !== 1) n++;
+  return n;
+}
+
+function shapedScene(shape, mode, padding, axis = 'z') {
+  const s = normalizeScene(createEmptyScene());
+  s.components.push(createComponent('rest_point', { id: 'rest-a', x: 0.35, y: 0.5, z: 0.5, radius: 0.03 }));
+  s.components.push(createComponent('rest_point', { id: 'rest-b', x: 0.65, y: 0.5, z: 0.5, radius: 0.03 }));
+  s.components.push(createComponent('point_load', { id: 'load', x: 0.5, y: 0.62, z: 0.5, fy: -1, magnitude: 1 }));
+  s.workingVolume = { shape, mode, padding, axis, bounds: { ...FULL_B } };
+  return s;
+}
+
+{
+  const dims = { nx: 20, ny: 20, nz: 20 };
+  const box = normalizeScene(createEmptyScene());
+  box.workingVolume = { shape: 'box', mode: 'full', padding: 0, bounds: { ...FULL_B } };
+  check(buildPassiveMask(20, 20, 20, box) === null, 'full box still has no outside void');
+
+  const sphere = normalizeScene(createEmptyScene());
+  sphere.workingVolume = { shape: 'sphere', mode: 'full', padding: 0, bounds: { ...FULL_B } };
+  const sm = buildPassiveMask(20, 20, 20, sphere);
+  // Inscribed sphere: centre (10,10,10), radius 10. Corner centre is ~16 cells out. Centre cell is under 1.
+  check(sm && cellAt(sm, 20, 20, 0, 0, 0) === 1, 'full sphere voids the domain corner');
+  check(sm && cellAt(sm, 20, 20, 10, 10, 10) !== 1, 'full sphere keeps the centre cell');
+
+  const cyl = normalizeScene(createEmptyScene());
+  cyl.workingVolume = { shape: 'cylinder', mode: 'manual', padding: 0, axis: 'z', bounds: { ...FULL_B } };
+  const cm = buildPassiveMask(20, 20, 20, cyl);
+  // Radius 10, length 20 along z. (0,0,10) is ~13 cells off the axis. (10,10,0) is on the axis.
+  check(cm && cellAt(cm, 20, 20, 0, 0, 10) === 1, 'full cylinder voids a point off the axis');
+  check(cm && cellAt(cm, 20, 20, 10, 10, 0) !== 1, 'full cylinder keeps a cell on the axis');
+
+  const bad = createEmptyScene();
+  bad.workingVolume.shape = 'cone';
+  bad.workingVolume.axis = 'q';
+  normalizeScene(bad);
+  check(bad.workingVolume.shape === 'box', 'unknown shape becomes a box');
+  const tilted = createEmptyScene();
+  tilted.workingVolume.shape = 'cylinder';
+  tilted.workingVolume.axis = 'q';
+  normalizeScene(tilted);
+  check(tilted.workingVolume.shape === 'cylinder' && tilted.workingVolume.axis === 'z', 'bad cylinder axis becomes z');
+}
+
+{
+  const dims = { nx: 32, ny: 32, nz: 32 };
+  const sphere0 = designableCells(shapedScene('sphere', 'auto', 0), dims);
+  const spherePad = designableCells(shapedScene('sphere', 'auto', 0.12), dims);
+  check(spherePad > sphere0, `sphere margin adds designable cells (${sphere0} → ${spherePad})`);
+  const cyl0 = designableCells(shapedScene('cylinder', 'auto', 0, 'x'), dims);
+  const cylPad = designableCells(shapedScene('cylinder', 'auto', 0.12, 'x'), dims);
+  check(cylPad > cyl0, `cylinder margin adds designable cells (${cyl0} → ${cylPad})`);
+  // Two rests spread on x. The cell under them (y = 8 on a 48 grid) sits off the
+  // x-cylinder, whose radius only covers their yz boxes, and inside the z-cylinder,
+  // whose radius has to reach both rests.
+  const spread = (axis) => {
+    const s = normalizeScene(createEmptyScene());
+    s.components.push(createComponent('rest_point', { id: 'rest-a', x: 0.2, y: 0.5, z: 0.5, radius: 0.02 }));
+    s.components.push(createComponent('rest_point', { id: 'rest-b', x: 0.8, y: 0.5, z: 0.5, radius: 0.02 }));
+    s.workingVolume = { shape: 'cylinder', mode: 'auto', padding: 0, axis, bounds: { ...FULL_B } };
+    return buildPassiveMask(48, 48, 48, s);
+  };
+  const alongX = spread('x');
+  const acrossZ = spread('z');
+  check(alongX && cellAt(alongX, 48, 48, 24, 8, 24) === 1, 'x-cylinder voids the cell below the rests');
+  check(acrossZ && cellAt(acrossZ, 48, 48, 24, 8, 24) !== 1, 'z-cylinder still covers the cell below the rests');
+}
+
+{
+  const dims = { nx: 36, ny: 24, nz: 24 };
+  for (const [shape, axis] of [['sphere', 'z'], ['cylinder', 'x'], ['cylinder', 'z']]) {
+    const full = shapedScene('box', 'full', 0, axis);
+    const shaped = shapedScene(shape, 'auto', 0, axis);
+    const mf = buildPassiveMask(dims.nx, dims.ny, dims.nz, full);
+    const ms = buildPassiveMask(dims.nx, dims.ny, dims.nz, shaped);
+    let lost = 0;
+    if (mf && ms) {
+      for (let i = 0; i < mf.length; i++) if (mf[i] === 2 && ms[i] !== 2) lost++;
+    }
+    check(lost === 0, `${shape}/${axis} auto keeps every solid cell (${lost} lost)`);
+
+    const nNodes = (dims.nx + 1) * (dims.ny + 1) * (dims.nz + 1);
+    const fixed = new Uint8Array(3 * nNodes);
+    const F = new Float32Array(3 * nNodes);
+    applyCustomBCs(fixed, F, dims.nx, dims.ny, dims.nz, shaped);
+    let stranded = 0;
+    for (let z = 0; z <= dims.nz; z++) {
+      for (let y = 0; y <= dims.ny; y++) {
+        for (let x = 0; x <= dims.nx; x++) {
+          const n = x + (dims.nx + 1) * (y + (dims.ny + 1) * z);
+          const used = fixed[3 * n] || fixed[3 * n + 1] || fixed[3 * n + 2] || F[3 * n] || F[3 * n + 1] || F[3 * n + 2];
+          if (!used || !ms) continue;
+          let held = false;
+          for (let ez = Math.max(0, z - 1); ez < Math.min(dims.nz, z + 1) && !held; ez++) {
+            for (let ey = Math.max(0, y - 1); ey < Math.min(dims.ny, y + 1) && !held; ey++) {
+              for (let ex = Math.max(0, x - 1); ex < Math.min(dims.nx, x + 1); ex++) {
+                if (ms[ex + dims.nx * (ey + dims.ny * ez)] !== 1) held = true;
+              }
+            }
+          }
+          if (!held) stranded++;
+        }
+      }
+    }
+    check(stranded === 0, `${shape}/${axis} auto keeps every BC node on material (${stranded} stranded)`);
+    const warn = analyzeScene(shaped, dims).warnings;
+    check(!warn.some((w) => w.includes('outside')), `${shape}/${axis} auto does not warn that a feature is outside`);
+  }
+}
+
+{
+  const dims = { nx: 32, ny: 32, nz: 32 };
+  const nNodes = 33 * 33 * 33;
+  const run = (x, y, z) => {
+    const s = normalizeScene(createEmptyScene());
+    s.workingVolume = { shape: 'sphere', mode: 'full', padding: 0, bounds: { ...FULL_B } };
+    s.components.push(createComponent('bolt_hole', {
+      id: 'bolt', x, y, z, radius: 0.04, axis: 'z', len: 0.2, loadMode: 'directional', fy: -1, magnitude: 1,
+    }));
+    const fixed = new Uint8Array(3 * nNodes);
+    const F = new Float32Array(3 * nNodes);
+    return applyCustomBCs(fixed, F, dims.nx, dims.ny, dims.nz, s);
+  };
+  const corner = run(0.02, 0.02, 0.02);
+  const centre = run(0.5, 0.5, 0.5);
+  check(corner.fixedNodes === 0, `bolt in the corner of a sphere is not fixed (${corner.fixedNodes})`);
+  check(corner.warnings.some((w) => w.includes('outside')), 'corner bolt warns that it is outside');
+  check(centre.fixedNodes > 0, `bolt at the centre of a sphere is fixed (${centre.fixedNodes})`);
+
+  const fit = fitGridForScene(shapedScene('sphere', 'auto', 0.06), { nx: 32, ny: 32, nz: 32 }, 8000);
+  check(fit.cropped && fit.scene.workingVolume.shape === 'sphere', 'fitting the domain keeps the sphere');
+  const m = buildPassiveMask(fit.dims.nx, fit.dims.ny, fit.dims.nz, fit.scene);
+  const mid = (n) => Math.floor(n / 2);
+  check(m && cellAt(m, fit.dims.nx, fit.dims.ny, 0, 0, 0) === 1, 'fitted sphere still voids a corner');
+  check(m && cellAt(m, fit.dims.nx, fit.dims.ny, mid(fit.dims.nx), mid(fit.dims.ny), mid(fit.dims.nz)) !== 1, 'fitted sphere still keeps the centre');
 }
 
 if (failed) { console.log(`\n${failed} check(s) FAILED`); process.exit(1); }
