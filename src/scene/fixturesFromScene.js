@@ -1,5 +1,5 @@
 import { componentDef, orderedFeatures } from './components/index.js';
-import { resolveWorkingBounds } from './workingVolume.js';
+import { attachVolume } from './workingVolume.js';
 
 /**
  * Visualization descriptor for a custom scene feature. Compatible with the preset
@@ -50,7 +50,7 @@ export function getCustomFixtureDescriptors(scene, nx, ny, nz) {
   const out = [];
   if (!scene) return out;
   const dims = { nx, ny, nz };
-  const wb = resolveWorkingBounds(scene, dims);
+  const wb = attachVolume(scene, dims);
   for (const c of orderedFeatures(scene)) {
     if (!c) continue;
     const glyphs = componentDef(c.type)?.glyphs?.(c, dims, wb);

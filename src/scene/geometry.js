@@ -109,16 +109,154 @@ export function axialElementRange(s0, s1, nA) {
 }
 
 /**
+ * Sphere or cylinder inscribed in `bounds`. Cell units, centre of the box.
+ * A cylinder's radius is half the shorter cross-section side. Its length is the axis side.
+ * @param {{ x0:number,x1:number,y0:number,y1:number,z0:number,z1:number }} bounds
+ * @param {{ nx:number, ny:number, nz:number }} dims
+ * @param {'sphere'|'cylinder'} shape
+ * @param {'x'|'y'|'z'} [axis]
+ */
+export function inscribedVolume(bounds, dims, shape, axis) {
+  const n = { x: dims.nx, y: dims.ny, z: dims.nz };
+  const size = {
+    x: (bounds.x1 - bounds.x0) * n.x,
+    y: (bounds.y1 - bounds.y0) * n.y,
+    z: (bounds.z1 - bounds.z0) * n.z,
+  };
+  const center = {
+    x: ((bounds.x0 + bounds.x1) / 2) * n.x,
+    y: ((bounds.y0 + bounds.y1) / 2) * n.y,
+    z: ((bounds.z0 + bounds.z1) / 2) * n.z,
+  };
+  if (shape === 'cylinder') {
+    const a = axis === 'x' || axis === 'y' ? axis : 'z';
+    const [p, q] = a === 'x' ? ['y', 'z'] : a === 'y' ? ['x', 'z'] : ['x', 'y'];
+    return {
+      shape: 'cylinder',
+      axis: a,
+      center,
+      radius: 0.5 * Math.min(size[p], size[q]),
+      halfLen: 0.5 * Math.max(0, size[a]),
+    };
+  }
+  return {
+    shape: 'sphere',
+    center,
+    radius: 0.5 * Math.min(size.x, size.y, size.z),
+  };
+}
+
+/** @param {number} x @param {number} y @param {number} z @param {ReturnType<typeof inscribedVolume>} metric */
+export function pointInInscribed(x, y, z, metric) {
+  const dx = x - metric.center.x;
+  const dy = y - metric.center.y;
+  const dz = z - metric.center.z;
+  const r2 = metric.radius * metric.radius + 1e-6;
+  if (metric.shape === 'sphere') return dx * dx + dy * dy + dz * dz <= r2;
+  const along = metric.axis === 'x' ? dx : metric.axis === 'y' ? dy : dz;
+  if (Math.abs(along) > metric.halfLen + 1e-6) return false;
+  return dx * dx + dy * dy + dz * dz - along * along <= r2;
+}
+
+/**
+ * Normalized span along `axis` where the line through `f` (other axes fixed) is inside
+ * the inscribed sphere or cylinder. Null when the line misses.
+ * @returns {[number, number] | null}
+ */
+export function axisSpanInVolume(f, bounds, axis, dims, shape, cylAxis) {
+  const metric = inscribedVolume(bounds, dims, shape, cylAxis);
+  const n = { x: dims.nx, y: dims.ny, z: dims.nz };
+  const fixed = { x: f.x * n.x, y: f.y * n.y, z: f.z * n.z };
+  const span = metric.shape === 'cylinder'
+    ? cylinderCellSpan(metric, fixed, axis)
+    : sphereCellSpan(metric, fixed, axis);
+  if (!span) return null;
+  return [span[0] / n[axis], span[1] / n[axis]];
+}
+
+function sphereCellSpan(metric, fixed, axis) {
+  const c = metric.center[axis];
+  let rest = 0;
+  for (const k of ['x', 'y', 'z']) {
+    if (k === axis) continue;
+    const d = fixed[k] - metric.center[k];
+    rest += d * d;
+  }
+  const room = metric.radius * metric.radius - rest;
+  if (room < 0) return null;
+  const half = Math.sqrt(room);
+  return [c - half, c + half];
+}
+
+/** Cell coordinate `t` along `axis` inside a finite cylinder. */
+function cylinderCellSpan(metric, fixed, axis) {
+  const C = metric.center;
+  const keys = ['x', 'y', 'z'];
+  const e = { x: 0, y: 0, z: 0 };
+  const b = { x: 0, y: 0, z: 0 };
+  for (const k of keys) {
+    e[k] = k === axis ? 1 : 0;
+    b[k] = (k === axis ? 0 : fixed[k]) - C[k];
+  }
+  const U = { x: metric.axis === 'x' ? 1 : 0, y: metric.axis === 'y' ? 1 : 0, z: metric.axis === 'z' ? 1 : 0 };
+  let eDotB = 0;
+  let b2 = 0;
+  let eDotU = 0;
+  let bDotU = 0;
+  for (const k of keys) {
+    eDotB += e[k] * b[k];
+    b2 += b[k] * b[k];
+    eDotU += e[k] * U[k];
+    bDotU += b[k] * U[k];
+  }
+  const A = 1 - eDotU * eDotU;
+  const B = 2 * (eDotB - eDotU * bDotU);
+  const Cc = b2 - bDotU * bDotU - metric.radius * metric.radius;
+  let radial;
+  if (A < 1e-12) {
+    if (Cc > 1e-8) return null;
+    radial = [-Infinity, Infinity];
+  } else {
+    const disc = B * B - 4 * A * Cc;
+    if (disc < 0) return null;
+    const s = Math.sqrt(Math.max(0, disc));
+    radial = [(-B - s) / (2 * A), (-B + s) / (2 * A)];
+  }
+  let axial;
+  if (Math.abs(eDotU) < 1e-12) {
+    if (Math.abs(bDotU) > metric.halfLen + 1e-8) return null;
+    axial = [-Infinity, Infinity];
+  } else {
+    const t0 = (-metric.halfLen - bDotU) / eDotU;
+    const t1 = (metric.halfLen - bDotU) / eDotU;
+    axial = [Math.min(t0, t1), Math.max(t0, t1)];
+  }
+  const lo = Math.max(radial[0], axial[0]);
+  const hi = Math.min(radial[1], axial[1]);
+  if (!(hi > lo)) return null;
+  return [lo, hi];
+}
+
+/**
  * Axial element range of a hole, clipped to the working volume.
+ * A sphere or cylinder clip rides on `wb.volumeShape` (set by the caller). A plain box is unchanged.
  * @returns {[number, number] | null} null if the hole lies outside the volume
  */
 export function holeAxialRange(f, wb, axis, nA) {
   const w0 = wb ? wb[`${axis}0`] : 0;
   const w1 = wb ? wb[`${axis}1`] : 1;
   const [h0, h1] = holeSpan(f);
-  const s0 = Math.max(h0, w0);
-  const s1 = Math.min(h1, w1);
+  let s0 = Math.max(h0, w0);
+  let s1 = Math.min(h1, w1);
   if (s1 <= s0) return null;
+  const shape = wb?.volumeShape;
+  if ((shape === 'sphere' || shape === 'cylinder') && wb.volumeDims) {
+    const chord = axisSpanInVolume(f, wb, axis, wb.volumeDims, shape, wb.volumeAxis);
+    if (!chord) return null;
+    s0 = Math.max(s0, chord[0]);
+    s1 = Math.min(s1, chord[1]);
+    if (s1 <= s0) return null;
+  }
   return axialElementRange(s0, s1, nA);
 }
 

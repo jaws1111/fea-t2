@@ -14,7 +14,7 @@ import { componentDef } from './components/index.js';
 import { reserveIds } from './components/ids.js';
 import { validAxis } from './geometry.js';
 import { createRigidLink, ensureLinks, pruneLinks } from './links.js';
-import { createDefaultWorkingVolume } from './workingVolume.js';
+import { createDefaultWorkingVolume, normalizeWorkingShape } from './workingVolume.js';
 
 /**
  * @typedef {'rest_point'|'rest_line'|'rest_ring'|'rest_pad'|'bolt_hole'|'wall_pad'|'wall_cylinder'|'wall_prism'|'surround'|'block'|'point_load'|'line_load'|'face_load'|'pressure'} ComponentType
@@ -199,7 +199,7 @@ export function normalizeScene(scene) {
   reserveIds(scene.components);
 
   if (!scene.workingVolume) scene.workingVolume = createDefaultWorkingVolume();
-  if (!scene.workingVolume.shape) scene.workingVolume.shape = 'box';
+  normalizeWorkingShape(scene.workingVolume);
   ensureLinks(scene);
   pruneLinks(scene);
   scene.version = 3;
