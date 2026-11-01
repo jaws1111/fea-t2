@@ -8,7 +8,7 @@ const now = () => (typeof performance !== 'undefined' ? performance.now() : Date
 /**
  * CPU backend with the common solver interface:
  *   async init()
- *   async solve({ nx,ny,nz,penal,preset,xPhys,globalU,KE }) ->
+ *   async solve({ nx,ny,nz,penal,scene,xPhys,globalU,KE }) ->
  *     { dc, compliance, cgResidual, maxDisp, U, backend:'cpu', feaMs }
  */
 export class CpuPcgSolver {
@@ -26,7 +26,7 @@ export class CpuPcgSolver {
 
   /**
    * @param {{
-   *   nx: number, ny: number, nz: number, penal: number, preset: string,
+   *   nx: number, ny: number, nz: number, penal: number, scene?: import('../scene/types.js').Scene | null,
    *   xPhys: Float32Array, globalU?: Float32Array | null, KE?: Float32Array,
    *   elementEnergies?: Float32Array,
    * }} params

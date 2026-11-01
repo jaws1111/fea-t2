@@ -217,7 +217,7 @@ export function setSmoothBodyVisible(meshApi, visible) {
   meshApi.mesh.visible = !!visible && !!meshApi.geometry?.index;
 }
 
-/** Drop the current surface and any queued job (grid / preset changed). */
+/** Drop the current surface and any queued job (the grid changed). */
 export function resetSmoothBody(meshApi) {
   if (!meshApi?.mesh) return;
   meshApi.jobId += 1; // invalidates a job still running in the worker

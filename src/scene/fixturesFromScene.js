@@ -2,8 +2,7 @@ import { componentDef, orderedFeatures } from './components/index.js';
 import { attachVolume } from './workingVolume.js';
 
 /**
- * Visualization descriptor for a custom scene feature. Compatible with the preset
- * `FixtureDescriptor` (kind + node indices) plus optional glyph metadata.
+ * Visualization descriptor for a scene feature (kind + node indices) plus optional glyph metadata.
  *
  * kinds:
  *   supports: 'rest' | 'bolt' | 'wall'

@@ -12,7 +12,7 @@ import { sceneLoadCaseCount } from '../scene/pointLoad.js';
 
 /** @param {import('./solverState.js').SolverState} state */
 export function loadCaseCount(state) {
-  return state?.preset === 'custom' ? sceneLoadCaseCount(state.scene) : 1;
+  return sceneLoadCaseCount(state?.scene);
 }
 
 /**
@@ -32,7 +32,6 @@ export function caseParams(state, k, count = loadCaseCount(state)) {
     ny: state.ny,
     nz: state.nz,
     penal: state.penal,
-    preset: state.preset,
     scene: state.scene,
     xPhys: state.xPhys,
     KE: state.KE,

@@ -31,13 +31,13 @@ const XMIN = 0.001;
  */
 export function stepSIMP(state, options = {}) {
   const KE = options.KE ?? state.KE ?? KE_24x24;
-  const { nx, ny, nz, volfrac, penal, rmin, preset, scene, x, xPhys } = state;
+  const { nx, ny, nz, volfrac, penal, rmin, scene, x, xPhys } = state;
   const totalElements = nx * ny * nz;
   const targetVolume = volfrac * totalElements;
 
   // Passive mask: 1 = void (xmin), 2 = solid boss / pad (1). OC never redesigns these.
   const passive =
-    preset === 'custom' && scene ? buildPassiveMask(nx, ny, nz, scene) : null;
+    scene ? buildPassiveMask(nx, ny, nz, scene) : null;
 
   const tFeaStart = performance.now();
   const feaResult =
@@ -49,7 +49,6 @@ export function stepSIMP(state, options = {}) {
       ny,
       nz,
       penal,
-      preset,
       scene,
       xPhys,
       globalU: state.globalU,
@@ -129,7 +128,7 @@ export function stepSIMP(state, options = {}) {
   }
 
   // Belt-and-suspenders: re-assert passive regions (also covers init drift).
-  if (preset === 'custom' && scene) {
+  if (scene) {
     applyPassiveRegions(x, xPhys, nx, ny, nz, scene, XMIN);
     achievedVol = 0;
     for (let i = 0; i < totalElements; i++) achievedVol += xPhys[i];

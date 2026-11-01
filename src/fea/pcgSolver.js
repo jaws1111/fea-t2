@@ -1,5 +1,5 @@
 import { FEA_CONSTANTS } from '../config/defaults.js';
-import { applyBCs } from '../presets/boundaryConditions.js';
+import { applyCustomBCs } from '../scene/applyCustomBCs.js';
 import { getElementDofs } from './indexing.js';
 
 const { Emin, E0, maxIters, cgTol } = FEA_CONSTANTS;
@@ -10,7 +10,6 @@ const { Emin, E0, maxIters, cgTol } = FEA_CONSTANTS;
  * @param {{
  *   nx: number, ny: number, nz: number,
  *   penal: number,
- *   preset: string,
  *   scene?: import('../scene/types.js').Scene | null,
  *   loadCase?: number,
  *   xPhys: Float32Array,
@@ -33,7 +32,6 @@ export function solveFEA({
   ny,
   nz,
   penal,
-  preset,
   scene = null,
   loadCase = 0,
   xPhys,
@@ -58,7 +56,7 @@ export function solveFEA({
   } else {
     fixedDofs = new Uint8Array(totalDofs);
     F = new Float32Array(totalDofs);
-    applyBCs(fixedDofs, F, nx, ny, nz, preset, scene, loadCase);
+    applyCustomBCs(fixedDofs, F, nx, ny, nz, scene, loadCase);
   }
 
   const diag = new Float32Array(totalDofs);

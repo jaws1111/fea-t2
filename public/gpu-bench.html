@@ -38,7 +38,7 @@
           for (let i = 0; i < n; i++) xPhys[i] = 0.35;
           const t0 = performance.now();
           const r = await backend.solve({
-            nx, ny, nz, penal: 3, preset: 'bridge', xPhys, globalU: null, KE: KE_24x24,
+            nx, ny, nz, penal: 3, xPhys, globalU: null, KE: KE_24x24,
           });
           const ms = performance.now() - t0;
           log(
@@ -59,7 +59,7 @@
         while (performance.now() < tEnd) {
           const t0 = performance.now();
           await backend.solve({
-            nx, ny, nz, penal: 3, preset: 'cantilever', xPhys, globalU: null, KE: KE_24x24,
+            nx, ny, nz, penal: 3, xPhys, globalU: null, KE: KE_24x24,
           });
           sumMs += performance.now() - t0;
           count++;

@@ -85,7 +85,6 @@ function compliance4(dims, scene, bc) {
     volfrac: SIMP.volfrac,
     penal: SIMP.penal,
     rmin: SIMP.rmin,
-    preset: 'custom',
     scene,
   });
   let last;

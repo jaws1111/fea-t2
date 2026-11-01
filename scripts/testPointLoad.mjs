@@ -119,7 +119,7 @@ console.log('6. Optimization: up/down load with two rests connects to both suppo
       createComponent('point_load', { x: 0.5, y: 0.7, z: 0.5, axes: 2, dirs: ['y-', 'y+'], axesMode: mode, magnitude: 1, radius: 0.1 }),
     );
     normalizeScene(scene);
-    const state = createSolverState({ nx: gx, ny: gy, nz: gz, volfrac: 0.2, penal: 3, rmin: 1.5, preset: 'custom', scene });
+    const state = createSolverState({ nx: gx, ny: gy, nz: gz, volfrac: 0.2, penal: 3, rmin: 1.5, scene });
     return state;
   };
   const connected = (state) => {

@@ -1,6 +1,6 @@
 import { FEA_CONSTANTS } from '../../config/defaults.js';
 import { KE_24x24 } from '../../fea/hex8Ke.js';
-import { applyBCs } from '../../presets/boundaryConditions.js';
+import { applyCustomBCs } from '../../scene/applyCustomBCs.js';
 import { buildPassiveMask } from '../../scene/passiveVoids.js';
 import { getGpuContext } from './context.js';
 
@@ -367,21 +367,21 @@ export class GpuPcgSolver {
     this.queue.writeBuffer(this._buf.pSimp, 0, v.buffer.slice(0));
   }
 
-  _ensureConstants({ nx, ny, nz, preset, scene = null, KE, loadCase = 0 }) {
+  _ensureConstants({ nx, ny, nz, scene = null, KE, loadCase = 0 }) {
     if (KE.length !== 576) throw new Error('KE must be a 24x24 Float32Array');
     if (this._keRef !== KE) {
       this.queue.writeBuffer(this._keBuf, 0, KE instanceof Float32Array ? KE : new Float32Array(KE));
       this._keRef = KE;
     }
 
-    const sceneKey = preset === 'custom' ? `:${JSON.stringify(scene)}` : '';
-    const baseKey = `${nx}x${ny}x${nz}:${preset}${sceneKey}`;
+    const sceneKey = scene ? `:${JSON.stringify(scene)}` : '';
+    const baseKey = `${nx}x${ny}x${nz}${sceneKey}`;
     const key = `${baseKey}#${loadCase}`;
     if (this._bcKey === key) return;
     const nDofs = this._nDofs;
     const fixedDofs = new Uint8Array(nDofs);
     const F = new Float32Array(nDofs);
-    applyBCs(fixedDofs, F, nx, ny, nz, preset, scene, loadCase);
+    applyCustomBCs(fixedDofs, F, nx, ny, nz, scene, loadCase);
     const mask = new Uint32Array(nDofs);
     for (let i = 0; i < nDofs; i++) mask[i] = fixedDofs[i];
     this.queue.writeBuffer(this._buf.fixed, 0, mask);
@@ -397,7 +397,7 @@ export class GpuPcgSolver {
     const nElements = this._nElements;
     const pass = new Uint32Array(nElements);
     let any = false;
-    if (preset === 'custom' && scene) {
+    if (scene) {
       const m = buildPassiveMask(nx, ny, nz, scene);
       if (m) {
         for (let i = 0; i < nElements; i++) {
@@ -511,7 +511,7 @@ export class GpuPcgSolver {
 
     this._ensureBuffers(nx, ny, nz);
     this._ensureConstants({
-      nx, ny, nz, preset: state.preset, scene: state.scene ?? null, KE: state.KE ?? KE_24x24,
+      nx, ny, nz, scene: state.scene ?? null, KE: state.KE ?? KE_24x24,
     });
     this._ensureFeaParams(state.penal);
     this._syncState(state);
@@ -632,7 +632,7 @@ export class GpuPcgSolver {
 
   /**
    * @param {{
-   *   nx: number, ny: number, nz: number, penal: number, preset: string,
+   *   nx: number, ny: number, nz: number, penal: number,
    *   scene?: import('../../scene/types.js').Scene | null,
    *   xPhys: Float32Array, globalU?: Float32Array | null, KE?: Float32Array,
    *   elementEnergies?: Float32Array,
@@ -661,14 +661,14 @@ export class GpuPcgSolver {
   }
 
   async _solveInner({
-    nx, ny, nz, penal, preset, scene = null, loadCase = 0, xPhys, globalU, KE = KE_24x24, elementEnergies,
+    nx, ny, nz, penal, scene = null, loadCase = 0, xPhys, globalU, KE = KE_24x24, elementEnergies,
   }) {
     const nDofs = 3 * (nx + 1) * (ny + 1) * (nz + 1);
     const nElements = nx * ny * nz;
     if (xPhys.length !== nElements) throw new Error('xPhys length does not match grid');
 
     this._ensureBuffers(nx, ny, nz);
-    this._ensureConstants({ nx, ny, nz, preset, scene, KE, loadCase });
+    this._ensureConstants({ nx, ny, nz, scene, KE, loadCase });
     this._ensureFeaParams(penal);
     const fixedDofs = this._fixedDofs;
     const { device, queue, _buf: buf } = this;

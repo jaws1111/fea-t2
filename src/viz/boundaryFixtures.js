@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getFixtureDescriptors } from '../presets/boundaryConditions.js';
+import { getCustomFixtureDescriptors } from '../scene/fixturesFromScene.js';
 import { nodeToWorld } from './coordinates.js';
 
 /** Dispose geometries/materials previously attached to a fixtures group. */
@@ -19,17 +19,17 @@ function clearGroup(group) {
 }
 
 /**
- * Rebuild support / load glyphs for the current preset and grid size.
+ * Rebuild support and load glyphs for the current scene and grid size.
  *
  * @param {THREE.Group} group
- * @param {{ nx: number, ny: number, nz: number, preset: string }} config
+ * @param {{ nx: number, ny: number, nz: number, scene?: import('../scene/types.js').Scene | null }} config
  * @returns {THREE.Group}
  */
 export function updateBoundaryFixtures(group, config) {
   clearGroup(group);
 
-  const { nx, ny, nz, preset } = config;
-  const descriptors = getFixtureDescriptors(preset, nx, ny, nz, config.scene ?? null);
+  const { nx, ny, nz } = config;
+  const descriptors = getCustomFixtureDescriptors(config.scene ?? null, nx, ny, nz);
 
   const pierMat = new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.4, metalness: 0.3 });
   const symMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.4, metalness: 0.3 });

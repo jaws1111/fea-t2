@@ -1247,7 +1247,6 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
       console.warn('[scene] Add at least one support and load before applying');
       return;
     }
-    config.preset = 'custom';
     onApply();
   });
 
