@@ -298,9 +298,10 @@ export function forNodesOnLine(nx, ny, nz, axis, x, y, z, len, cb) {
  * @param {number} height  normalized size along second in-plane axis
  * @param {number} depth   number of node layers into the domain (>=1)
  * @param {(ix:number, iy:number, iz:number, dist:number) => void} cb
+ * @param {number} [inset=0] cells trimmed from each end of the width axis
  * @returns {number}
  */
-export function forNodesOnFacePatch(nx, ny, nz, face, u, v, width, height, depth, cb) {
+export function forNodesOnFacePatch(nx, ny, nz, face, u, v, width, height, depth, cb, inset = 0) {
   const axis = face[0];
   const high = face[1] === '+';
   const dims = { x: nx, y: ny, z: nz };
@@ -314,8 +315,13 @@ export function forNodesOnFacePatch(nx, ny, nz, face, u, v, width, height, depth
     const hi = clamp(Math.round((c + half) * n), 0, n);
     return [Math.min(lo, hi), Math.max(lo, hi)];
   };
-  const [u0, u1] = range(u, width, nU);
+  let [u0, u1] = range(u, width, nU);
   const [v0, v1] = range(v, height, nV);
+  const trim = Math.max(0, Math.round(Number.isFinite(inset) ? inset : 0));
+  if (trim > 0) {
+    u0 += trim;
+    u1 -= trim;
+  }
   const layers = Math.max(1, Math.round(depth || 1));
   const xyz = [0, 0, 0];
   let count = 0;

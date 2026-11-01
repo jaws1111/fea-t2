@@ -526,6 +526,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
         ]);
         html += field('Width', 'width', item.width, 0.05, 0.05, 1);
         html += field('Height', 'height', item.height, 0.05, 0.05, 1);
+        html += field('Width inset (cells)', 'inset', item.inset ?? 0, 1, 0, 64);
       }
       html += field('Fx', 'fx', item.fx, 0.1, -1, 1);
       html += field('Fy', 'fy', item.fy, 0.1, -1, 1);

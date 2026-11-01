@@ -2,6 +2,10 @@ import { forNodesOnFacePatch } from '../tools.js';
 import { nextId } from './ids.js';
 import { distributeResultant, faceFrame, normalizeDir, num, stripUndefined, unitDir } from './shared.js';
 
+function insetCells(c) {
+  return Math.max(0, Math.round(num(c.inset, 0)));
+}
+
 export const faceLoad = {
   type: 'face_load',
   family: 'fixload',
@@ -23,6 +27,7 @@ export const faceLoad = {
       fy: -1,
       fz: 0,
       magnitude: 1,
+      inset: 0,
     };
     return { ...base, ...stripUndefined(partial), type: 'face_load' };
   },
@@ -31,6 +36,7 @@ export const faceLoad = {
     c.magnitude = num(c.magnitude, 1);
     c.width = num(c.width, 1);
     c.height = num(c.height, 1);
+    c.inset = insetCells(c);
   },
 
   roles() {
@@ -42,11 +48,12 @@ export const faceLoad = {
     const frame = faceFrame(c.face, ctx.dims);
     const u = c[frame.perp[0]];
     const v = c[frame.perp[1]];
+    const inset = insetCells(c);
     /** @type {{ n: number, w: number, ix: number, iy: number, iz: number }[]} */
     const nodes = [];
     forNodesOnFacePatch(nx, ny, nz, frame.face, u, v, c.width ?? 1, c.height ?? 1, 1, (ix, iy, iz) => {
       nodes.push({ n: ctx.idx(ix, iy, iz), w: 1, ix, iy, iz });
-    });
+    }, inset);
     distributeResultant(ctx.F, nodes, normalizeDir(c.fx, c.fy, c.fz), num(c.magnitude, 1));
     ctx.count.loadedNodes += nodes.length;
   },
@@ -55,7 +62,7 @@ export const faceLoad = {
     const frame = faceFrame(c.face, dims);
     const { axis, high, perp, n } = frame;
     const half = { x: 1, y: 1, z: 1 };
-    half[perp[0]] = (Math.max(0.05, num(c.width, 1)) / 2) * n[perp[0]];
+    half[perp[0]] = Math.max(0, (Math.max(0.05, num(c.width, 1)) / 2) * n[perp[0]] - insetCells(c));
     half[perp[1]] = (Math.max(0.05, num(c.height, 1)) / 2) * n[perp[1]];
     half[axis] = 1;
     const cen = { x: num(c.x, 0.5), y: num(c.y, 0.5), z: num(c.z, 0.5) };
@@ -75,11 +82,12 @@ export const faceLoad = {
     const frame = faceFrame(c.face, dims);
     const u = c[frame.perp[0]];
     const v = c[frame.perp[1]];
+    const inset = insetCells(c);
     /** @type {{ ix: number, iy: number, iz: number }[]} */
     const pts = [];
     forNodesOnFacePatch(nx, ny, nz, frame.face, u, v, c.width ?? 1, c.height ?? 1, 1, (ix, iy, iz) => {
       pts.push({ ix, iy, iz });
-    });
+    }, inset);
     if (!pts.length) return [];
     const dir = unitDir(c.fx, c.fy, c.fz, num(c.magnitude, 1));
     /** @type {object[]} */

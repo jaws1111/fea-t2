@@ -76,7 +76,7 @@ const CLASSIC = [
   classic(
     'deck',
     'Deck Bridge',
-    'Pinned at both ends, road load spread over the top face. The face includes the two edge columns the old preset left unloaded.',
+    'Pinned at both ends, road load on the top face, one cell in from each span end.',
     { x: 4, y: 1, z: 2 / 3 },
     [
       pier('deck-left', 0),
@@ -89,6 +89,8 @@ const CLASSIC = [
         face: 'y+',
         width: 1,
         height: 1,
+        // A fraction of the span cannot drop exactly one column on every grid.
+        inset: 1,
         fx: 0,
         fy: -1,
         fz: 0,
