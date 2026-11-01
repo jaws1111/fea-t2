@@ -56,6 +56,8 @@ export function createConfig(overrides = {}) {
     defScale: 0.0,
     batchSize: 1,
     preset: 'bridge',
+    /** Library recipe currently shown, or null after the first edit. */
+    recipeId: null,
     /** Level 1: how the design is drawn. */
     viewMode: 'cubes',
     /** Level 2: what the colour shows (applies to both representations). */

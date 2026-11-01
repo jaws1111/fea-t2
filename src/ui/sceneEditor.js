@@ -6,7 +6,7 @@ import {
   normalizeScene,
 } from '../scene/types.js';
 import { componentDef, FAMILIES } from '../scene/components/index.js';
-import { SCENE_EXAMPLES } from '../scene/templates.js';
+import { listRecipes } from '../library/store.js';
 import {
   computeAutoWorkingBounds,
   ensureWorkingVolume,
@@ -73,11 +73,11 @@ function holeSummary(f) {
  *   onTabChange?: (name: 'optimize'|'scene') => void,
  *   onSelect?: (sel: { id: string } | null) => void,
  *   onClear?: () => void,
- *   onResolution?: (key: string) => void,
+ *   onLoadRecipe?: (recipeId: string) => void,
  *   onFitDomain?: () => void,
  * }} deps
  */
-export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSelect, onClear, onResolution, onFitDomain }) {
+export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSelect, onClear, onLoadRecipe, onFitDomain }) {
   const ac = new AbortController();
   const { signal } = ac;
   const on = (el, type, fn) => el?.addEventListener(type, fn, { signal });
@@ -86,7 +86,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
 
   /** @type {{ id: string } | null} */
   let selected = null;
-  /** @type {import('../scene/types.js').Scene[]} */
+  /** @type {{ scene: import('../scene/types.js').Scene, recipeId: string | null }[]} */
   const undoStack = [];
   /** @type {'optimize'|'scene'|'stage'} */
   let activeTab = 'optimize';
@@ -99,13 +99,25 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
   ensureScene();
 
   function pushUndo() {
-    undoStack.push(cloneScene(ensureScene()));
+    undoStack.push({ scene: cloneScene(ensureScene()), recipeId: config.recipeId ?? null });
     if (undoStack.length > MAX_UNDO) undoStack.shift();
+    config.recipeId = null;
+  }
+
+  function highlightRecipe() {
+    const root = $('scene-examples');
+    if (!root) return;
+    root.querySelectorAll('[data-recipe]').forEach((btn) => {
+      const on = btn.dataset.recipe === config.recipeId;
+      btn.classList.toggle('is-active', on);
+    });
   }
 
   function undo() {
     if (!undoStack.length) return;
-    config.scene = undoStack.pop();
+    const prev = undoStack.pop();
+    config.scene = prev.scene;
+    config.recipeId = prev.recipeId;
     ensureScene();
     selected = null;
     onSelect?.(null);
@@ -124,6 +136,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     renderInspector();
     renderWorkingVolumeUI();
     renderWarnings();
+    highlightRecipe();
   }
 
   /* ------------------------------ Warnings ------------------------------ */
@@ -172,6 +185,10 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
       meta = f.face;
     } else if (f.type === 'rest_point') {
       meta = `${f.x.toFixed(2)}, ${f.y.toFixed(2)}`;
+    } else if (f.type === 'rest_line') {
+      meta = `${String(f.axis || 'z').toUpperCase()} line`;
+    } else if (f.type === 'line_load' || f.type === 'face_load') {
+      meta = `|F|=${Number(f.magnitude).toFixed(2)}`;
     } else {
       const extra =
         f.type === 'pressure'
@@ -485,11 +502,35 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
       html += field('Width', 'width', item.width, 0.05, 0.05, 1);
       html += field('Height', 'height', item.height, 0.05, 0.05, 1);
       html += field('Depth (cells)', 'depth', item.depth, 1, 1, 8);
+      html += checkField('Solid', 'solid', item.solid !== false);
     } else if (item.type === 'rest_point') {
       html += field('Radius', 'radius', item.radius, 0.01, 0.02, 0.5);
       html += checkField('Fix X', 'fixX', item.fixX !== false);
       html += checkField('Fix Y', 'fixY', item.fixY !== false);
       html += checkField('Fix Z', 'fixZ', item.fixZ !== false);
+      html += checkField('Solid', 'solid', item.solid !== false);
+    } else if (item.type === 'rest_line') {
+      html += selectField('Axis', 'axis', item.axis, [['x', 'X'], ['y', 'Y'], ['z', 'Z']]);
+      html += field('Length', 'len', item.len, 0.05, 0.05, 1);
+      html += checkField('Fix X', 'fixX', item.fixX !== false);
+      html += checkField('Fix Y', 'fixY', item.fixY !== false);
+      html += checkField('Fix Z', 'fixZ', item.fixZ !== false);
+      html += checkField('Solid', 'solid', item.solid !== false);
+    } else if (item.type === 'line_load' || item.type === 'face_load') {
+      if (item.type === 'line_load') {
+        html += selectField('Axis', 'axis', item.axis, [['x', 'X'], ['y', 'Y'], ['z', 'Z']]);
+        html += field('Length', 'len', item.len, 0.05, 0.05, 1);
+      } else {
+        html += selectField('Face', 'face', item.face, [
+          ['x-', 'X−'], ['x+', 'X+'], ['y-', 'Y−'], ['y+', 'Y+'], ['z-', 'Z−'], ['z+', 'Z+'],
+        ]);
+        html += field('Width', 'width', item.width, 0.05, 0.05, 1);
+        html += field('Height', 'height', item.height, 0.05, 0.05, 1);
+      }
+      html += field('Fx', 'fx', item.fx, 0.1, -1, 1);
+      html += field('Fy', 'fy', item.fy, 0.1, -1, 1);
+      html += field('Fz', 'fz', item.fz, 0.1, -1, 1);
+      html += field('Magnitude', 'magnitude', item.magnitude, 0.1, -5, 5);
     } else if (item.type === 'pressure') {
       html += pressureInspector(item);
     } else {
@@ -631,39 +672,28 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
   /* ------------------------------ Examples ------------------------------ */
   const examplesEl = $('scene-examples');
   if (examplesEl) {
-    examplesEl.innerHTML = SCENE_EXAMPLES.map(
-      (ex) => `<button type="button" class="btn-secondary !py-1.5 text-[10px]" data-example="${ex.id}" title="${ex.blurb}">
-        <i class="ph ${ex.icon ?? 'ph-cube'}"></i> ${ex.title}
+    const examples = listRecipes().filter((r) => r.meta?.group === 'example');
+    examplesEl.innerHTML = examples
+      .map(
+        (ex) => `<button type="button" class="btn-secondary !py-1.5 text-[10px]" data-recipe="${ex.id}" title="${ex.meta?.blurb ?? ''}">
+        <i class="ph ${ex.meta?.icon ?? 'ph-cube'}"></i> ${ex.name}
       </button>`,
-    ).join('');
+      )
+      .join('');
     on(examplesEl, 'click', (e) => {
-      const btn = e.target.closest('[data-example]');
-      const ex = btn && SCENE_EXAMPLES.find((s) => s.id === btn.dataset.example);
-      if (!ex) return;
-      pushUndo();
-      // Switch to the grid the example was tuned for BEFORE building / fitting the scene.
-      if (ex.resolution && ex.resolution !== `${config.nx}x${config.ny}x${config.nz}`) {
-        onResolution?.(ex.resolution);
-      }
-      config.scene = normalizeScene(ex.build());
-      ensureWorkingVolume(config.scene, dims());
-      config.scene.workingVolume.mode = 'auto';
-      config.scene.workingVolume.bounds = computeAutoWorkingBounds(
-        config.scene,
-        config.scene.workingVolume.padding ?? 0.06,
-        dims(),
-      );
-      if (typeof ex.volfrac === 'number') {
-        config.volfrac = ex.volfrac;
-        const volInput = $('input-volfrac');
-        const volLabel = $('val-volfrac');
-        if (volInput) volInput.value = String(ex.volfrac);
-        if (volLabel) volLabel.textContent = ex.volfrac.toFixed(2);
-      }
-      selected = null;
-      onSelect?.(null);
-      notify(false);
+      const btn = e.target.closest('[data-recipe]');
+      if (!btn?.dataset.recipe) return;
+      onLoadRecipe?.(btn.dataset.recipe);
     });
+  }
+
+  function loadScene(scene) {
+    pushUndo();
+    config.scene = normalizeScene(cloneScene(scene));
+    ensureWorkingVolume(config.scene, dims());
+    selected = null;
+    onSelect?.(null);
+    notify(false);
   }
 
   function clearScene() {
@@ -974,10 +1004,16 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
 
   return {
     showTab,
-    refresh: () => notify(false),
+    loadScene,
+    highlightRecipe,
+    refresh: () => {
+      config.recipeId = null;
+      notify(false);
+    },
     /** Swap in a re-normalised scene (grid change): old undo snapshots no longer fit. */
     replaceScene: (scene) => {
       config.scene = scene;
+      config.recipeId = null;
       undoStack.length = 0;
       selected = null;
       onSelect?.(null);

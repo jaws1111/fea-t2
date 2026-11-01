@@ -3,18 +3,18 @@ import { getRampCssGradient } from '../viz/colormaps.js';
 
 import { bindSceneEditor } from './sceneEditor.js';
 import { bindStageOptimizer } from './stageOptimizer.js';
-import { createTwoBoltBracketScene } from '../scene/templates.js';
 import { isSceneEmpty, normalizeScene } from '../scene/types.js';
 import { fitDimsForBudget, fitGridForBounds, fitGridForScene } from '../scene/domainFit.js';
-import { archetypeDims, isArchetype } from '../presets/archetypes.js';
+import { resolveRecipe } from '../library/apply.js';
+import { getRecipe } from '../library/store.js';
 
-const PRESETS = [
-  { id: 'preset-bridge', key: 'bridge' },
-  { id: 'preset-deck', key: 'deck' },
-  { id: 'preset-cantilever', key: 'cantilever' },
-  { id: 'preset-mbb', key: 'mbb' },
-  { id: 'preset-michell', key: 'michell' },
-  { id: 'preset-custom', key: 'custom' },
+const SHORTCUT_IDS = [
+  'preset-bridge',
+  'preset-deck',
+  'preset-cantilever',
+  'preset-mbb',
+  'preset-michell',
+  'preset-custom',
 ];
 
 /** Level 1: how the design is drawn. */
@@ -134,10 +134,11 @@ export function bindAll({
 
   /* ---------------- Visual helpers ---------------- */
   function renderPresetButtons() {
-    for (const p of PRESETS) {
-      const el = $(p.id);
+    for (const id of SHORTCUT_IDS) {
+      const el = $(id);
       if (!el) continue;
-      const active = p.key === config.preset;
+      const recipe = el.dataset.recipe || null;
+      const active = recipe ? config.recipeId === recipe : !config.recipeId;
       el.classList.toggle('is-active', active);
       el.setAttribute('aria-pressed', String(active));
     }
@@ -235,32 +236,62 @@ export function bindAll({
 
   on($('btn-reset'), 'click', () => resetSimulation());
 
+  /**
+   * Load a library recipe into the draft scene and, when `simulate` is set, rebuild the solver.
+   * `loadScene` clears `recipeId` via undo, so the id is written after that call.
+   */
+  function loadLibraryRecipe(recipeId, { simulate }) {
+    const recipe = getRecipe(recipeId);
+    if (!recipe) return;
+    const resolved = resolveRecipe(recipe, currentBudget());
+    const cur = `${config.nx}x${config.ny}x${config.nz}`;
+    const listed = [...($('select-res')?.options ?? [])].some((o) => !o.dataset.dyn && o.value === cur);
+    const key = config.resKey ?? (listed ? cur : null);
+    const changed =
+      resolved.dims.nx !== config.nx || resolved.dims.ny !== config.ny || resolved.dims.nz !== config.nz;
+    config.nx = resolved.dims.nx;
+    config.ny = resolved.dims.ny;
+    config.nz = resolved.dims.nz;
+    config.resKey = key;
+    config.preset = 'custom';
+    if (Number.isFinite(resolved.volfrac)) {
+      config.volfrac = resolved.volfrac;
+      const volInput = $('input-volfrac');
+      if (volInput) volInput.value = String(resolved.volfrac);
+    }
+    if (Number.isFinite(resolved.rmin)) {
+      config.rmin = resolved.rmin;
+      const rminInput = $('input-rmin');
+      if (rminInput) rminInput.value = String(resolved.rmin);
+    }
+    sceneEditor.loadScene(resolved.scene);
+    config.recipeId = recipeId;
+    sceneEditor.highlightRecipe();
+    renderSliderLabels();
+    renderResolution();
+    renderPresetButtons();
+    if (changed) onRebuild(config);
+    if (simulate) resetSimulation();
+  }
+
   /* ---------------- Presets ---------------- */
-  for (const p of PRESETS) {
-    on($(p.id), 'click', () => {
-      config.preset = p.key;
-      if (isArchetype(p.key)) {
-        // Every archetype has its own working-volume shape: re-mesh the domain with it at the
-        // cell count chosen in "Voxel Domain".
-        const cur = `${config.nx}x${config.ny}x${config.nz}`;
-        const listed = [...($('select-res')?.options ?? [])].some((o) => !o.dataset.dyn && o.value === cur);
-        const key = config.resKey ?? (listed ? cur : null);
-        const d = archetypeDims(p.key, currentBudget());
-        const changed = d.nx !== config.nx || d.ny !== config.ny || d.nz !== config.nz;
-        config.nx = d.nx;
-        config.ny = d.ny;
-        config.nz = d.nz;
-        config.resKey = key;
-        renderResolution();
-        if (changed) onRebuild(config);
-      }
-      if (p.key === 'custom') {
-        config.scene = config.scene ? normalizeScene(config.scene) : null;
-        if (isSceneEmpty(config.scene)) config.scene = createTwoBoltBracketScene();
+  for (const id of SHORTCUT_IDS) {
+    on($(id), 'click', () => {
+      const recipe = $(id)?.dataset.recipe || null;
+      if (!recipe) {
+        config.recipeId = null;
+        config.preset = 'custom';
+        if (isSceneEmpty(config.scene)) {
+          const fallback = getRecipe('builtin:two_bolt_bracket');
+          if (fallback) sceneEditor.loadScene(fallback.scene);
+          config.recipeId = null;
+        }
+        sceneEditor.highlightRecipe();
         sceneEditor.showTab('scene');
+        renderPresetButtons();
+        return;
       }
-      renderPresetButtons();
-      resetSimulation();
+      loadLibraryRecipe(recipe, { simulate: true });
     });
   }
 
@@ -337,15 +368,19 @@ export function bindAll({
   on($('select-res'), 'change', (e) => {
     setRunning(false);
     const [nx, ny, nz] = e.target.value.split('x').map(Number);
-    if (config.preset === 'custom' && hasScene()) {
-      applyGridBudget(nx * ny * nz, e.target.value);
+    const budget = nx * ny * nz;
+    const recipe = config.recipeId ? getRecipe(config.recipeId) : null;
+    const classic = recipe?.meta?.domain && !Number.isFinite(recipe.meta.domain.budget);
+    if (classic) {
+      const d = fitDimsForBudget(recipe.meta.domain, budget);
+      config.nx = d.nx;
+      config.ny = d.ny;
+      config.nz = d.nz;
+      config.resKey = e.target.value;
+    } else if (config.preset === 'custom' && hasScene()) {
+      applyGridBudget(budget, e.target.value);
     } else {
-      // Entries are cell budgets: an archetype meshes its own working-volume shape with them,
-      // an empty custom scene keeps the current proportions.
-      const budget = nx * ny * nz;
-      const d = isArchetype(config.preset)
-        ? archetypeDims(config.preset, budget)
-        : fitDimsForBudget({ x: config.nx, y: config.ny, z: config.nz }, budget);
+      const d = fitDimsForBudget({ x: config.nx, y: config.ny, z: config.nz }, budget);
       config.nx = d.nx;
       config.ny = d.ny;
       config.nz = d.nz;
@@ -387,16 +422,9 @@ export function bindAll({
   const sceneEditor = bindSceneEditor({
     config,
     onFitDomain: fitDomainToVolume,
-    onResolution: (key) => {
-      const [nx, ny, nz] = key.split('x').map(Number);
-      if (![nx, ny, nz].every((v) => Number.isFinite(v) && v > 0)) return;
+    onLoadRecipe: (recipeId) => {
       setRunning(false);
-      config.resKey = null;
-      config.nx = nx;
-      config.ny = ny;
-      config.nz = nz;
-      renderResolution();
-      onRebuild(config);
+      loadLibraryRecipe(recipeId, { simulate: false });
       stageApi?.invalidate();
     },
     onApply: () => {
@@ -405,6 +433,7 @@ export function bindAll({
       resetSimulation();
     },
     onChange: () => {
+      renderPresetButtons();
       // Always preview fixtures from the draft scene while editing / when custom.
       if (sceneApi.fixturesGroup) {
         updateBoundaryFixtures(sceneApi.fixturesGroup, fixtureConfig());
@@ -511,6 +540,7 @@ export function bindAll({
     applyStage,
   });
 
+  loadLibraryRecipe('builtin:bridge', { simulate: false });
   syncUI();
 
   return {
