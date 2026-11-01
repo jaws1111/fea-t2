@@ -6,27 +6,22 @@
  *   - radius      : fraction of max(nx, ny, nz)  (NOT per-axis)
  *   - width/height: fraction of the face extent along the respective in-plane axis
  *
- * Scenes are plain JSON-serialisable objects (safe to postMessage to the worker).
+ * A scene is one list of components. Each component's `type` selects a definition
+ * in `src/scene/components/`. Scenes are plain JSON (safe to postMessage).
  */
 
-import { createDefaultWorkingVolume } from './workingVolume.js';
-import { createRigidLink, ensureLinks, pruneLinks } from './links.js';
+import { componentDef } from './components/index.js';
+import { reserveIds } from './components/ids.js';
 import { validAxis } from './geometry.js';
-import { POINT_DIRS, pointLoadAxes, pointLoadDirs, pointLoadMode } from './pointLoad.js';
+import { createRigidLink, ensureLinks, pruneLinks } from './links.js';
+import { createDefaultWorkingVolume } from './workingVolume.js';
 
 /**
- * @typedef {'rest_point'|'bolt_hole'|'wall_pad'} FixationType
- * @typedef {'point_load'|'pressure'} ForceType
+ * @typedef {'rest_point'|'bolt_hole'|'wall_pad'|'point_load'|'pressure'} ComponentType
  * @typedef {'x'|'y'|'z'} Axis
  * @typedef {'x-'|'x+'|'y-'|'y+'|'z-'|'z+'} Face
  * @typedef {'none'|'directional'|'multi'|'circular'} BoltLoadMode
  */
-
-/** @type {readonly FixationType[]} */
-export const FIXATION_TYPES = Object.freeze(['rest_point', 'bolt_hole', 'wall_pad']);
-
-/** @type {readonly ForceType[]} */
-export const FORCE_TYPES = Object.freeze(['point_load', 'pressure']);
 
 /** @type {readonly Face[]} */
 export const FACES = Object.freeze(['x-', 'x+', 'y-', 'y+', 'z-', 'z+']);
@@ -35,207 +30,40 @@ export const FACES = Object.freeze(['x-', 'x+', 'y-', 'y+', 'z-', 'z+']);
 export const BOLT_LOAD_MODES = Object.freeze(['none', 'directional', 'multi', 'circular']);
 
 /**
- * A support, mounting hole or pad.
+ * One fixation, load, or both. Fields stay flat on the object (`c.radius`, not `c.params`).
+ * Per-type fields match the v2 fixation and force objects.
  *
- * rest_point : small sphere of nodes around (x,y,z) (a "foot" on the ground).
- * wall_pad   : rectangular patch on `face`, `width` × `height`, `depth` layers.
- * bolt_hole  : ONE object for a bolt / pin hole. A through-bore along `axis`
- *              of user-defined length `len` (centred on the hole) with a locked solid boss around
- *              it. It carries BOTH its constraint and its load:
- *                fixX/fixY/fixZ  which translations the hole clamps
- *                loadMode        'none' | 'directional' (one vector) |
- *                                'multi' (several vectors) | 'circular'
- *                directional : fx,fy,fz + magnitude, applied as bearing on the
- *                              bore wall facing the load
- *                multi       : loads[] of {fx,fy,fz,magnitude}, each a bearing
- *                circular    : circMode 'torque' (tangential, signed magnitude =
- *                              CCW/CW about +axis) or 'radial' (press-fit; +out)
- *              A load component along a FIXED axis is absorbed by the support
- *              (the editor warns) — free the axis to let the load reach the part.
- *
- * @typedef {Object} Fixation
+ * @typedef {Object} Component
  * @property {string} id
- * @property {FixationType} type
+ * @property {ComponentType} type
  * @property {number} x @property {number} y @property {number} z
- * @property {number} radius
- * @property {Axis} axis
- * @property {number} len bolt_hole length along its axis (fraction of the domain, default 0.25),
- *                        centred on the hole's coordinate along that axis
- * @property {Face} face
- * @property {number} width @property {number} height @property {number} depth
- * @property {boolean} fixX @property {boolean} fixY @property {boolean} fixZ
- * @property {BoltLoadMode} loadMode
- * @property {number} fx @property {number} fy @property {number} fz
- * @property {number} magnitude
- * @property {{ fx: number, fy: number, fz: number, magnitude: number }[]} loads
- * @property {'torque'|'radial'} circMode
- */
-
-/**
- * A free-standing load.
- *
- * point_load : force at the node nearest (x,y,z). With `axes` 2..6 it carries |F| along each
- *              chosen axis direction (`dirs`, e.g. 'x+','y-'): `axesMode` 'cases' (default) =
- *              separate load cases the supports react one by one, 'burst' = all at once, each
- *              `radius` cells out along its direction. See pointLoad.js.
- * pressure   : distributed load on a cavity wall ('sphere' `radius`, or 'box'
- *              half-extents hx,hy,hz). `pressureMode: 'radial'` pushes outward from
- *              the centre (`inward`/negative magnitude flips); 'directional' pushes
- *              along (fx,fy,fz) on the facing half. With `cavityVoid` (default) the
- *              cavity interior is permanent void and a `wall`-cell solid wall is
- *              locked around it so the pressure always has material to act on.
- *
- * (Bolt-bearing loads now live ON the bolt_hole; legacy `bolt_bearing` forces are
- * migrated by `normalizeScene`.)
- *
- * @typedef {Object} Force
- * @property {string} id
- * @property {ForceType} type
- * @property {number} x @property {number} y @property {number} z
- * @property {number} fx @property {number} fy @property {number} fz
- * @property {number} magnitude
- * @property {number} radius
- * @property {'sphere'|'box'} shape
- * @property {number} hx @property {number} hy @property {number} hz
- * @property {'radial'|'directional'} pressureMode
- * @property {boolean} inward
- * @property {boolean} cavityVoid
- * @property {number} wall   wall thickness in cells
- * @property {number} [axes]  point_load: number of force axes 1..6 (default 1)
- * @property {string[]} [dirs] point_load: chosen directions when axes > 1 ('x+', 'x-', ...)
- * @property {'cases'|'burst'} [axesMode] point_load with axes > 1: separate load cases or one burst
  */
 
 /**
  * @typedef {Object} Scene
- * @property {number} version
- * @property {Fixation[]} fixations
- * @property {Force[]} forces
- * @property {import('./workingVolume.js').WorkingVolume} [workingVolume]
- * @property {import('./links.js').RigidLink[]} [links]
+ * @property {3} version
+ * @property {Component[]} components
+ * @property {import('./links.js').RigidLink[]} links
+ * @property {import('./workingVolume.js').WorkingVolume} workingVolume
  */
 
-let _idCounter = 0;
-function nextId(prefix) {
-  _idCounter += 1;
-  return `${prefix}_${_idCounter}`;
-}
-
-export { nextId };
-
-/** @returns {Scene} */
-export function createEmptyScene() {
-  return {
-    version: 2,
-    fixations: [],
-    forces: [],
-    links: [],
-    workingVolume: createDefaultWorkingVolume(),
-  };
+/**
+ * @param {string} type
+ * @param {Record<string, any>} [partial]
+ * @returns {Component}
+ */
+export function createComponent(type, partial = {}) {
+  const def = componentDef(type);
+  if (!def) throw new Error(`Unknown component type: ${type}`);
+  return def.create(partial);
 }
 
 /**
- * @param {Partial<Fixation>} [partial]
- * @returns {Fixation}
- */
-export function createFixation(partial = {}) {
-  const type = partial.type ?? 'rest_point';
-  /** @type {Fixation} */
-  const base = {
-    id: nextId('fix'),
-    type,
-    x: 0.5,
-    y: 0,
-    z: 0.5,
-    radius: type === 'bolt_hole' ? 0.04 : 0.03,
-    axis: 'z',
-    len: 0.25,
-    face: 'x-',
-    width: 1,
-    height: 1,
-    depth: 1,
-    fixX: true,
-    fixY: true,
-    fixZ: true,
-    loadMode: 'none',
-    fx: 0,
-    fy: -1,
-    fz: 0,
-    magnitude: 1,
-    loads: [],
-    circMode: 'torque',
-  };
-  const out = { ...base, ...stripUndefined(partial) };
-  if (type === 'bolt_hole') migrateHoleSpan(out, Number.isFinite(partial.len));
-  return out;
-}
-
-/**
- * Legacy holes stored an absolute axial span [s0, s1]. The span is now `len` centred on
- * the hole's own coordinate along its axis (short pins stay short, independent of the
- * domain). Converts in place; a no-op for current data.
- * @param {Record<string, any>} f
- * @param {boolean} [explicitLen]  `len` was supplied by the caller (wins over s0/s1)
- */
-export function migrateHoleSpan(f, explicitLen = false) {
-  const hasLegacy = Number.isFinite(f.s0) || Number.isFinite(f.s1);
-  if (hasLegacy && !explicitLen) {
-    const a = Number.isFinite(f.s0) ? f.s0 : 0;
-    const b = Number.isFinite(f.s1) ? f.s1 : 1;
-    const axis = f.axis === 'x' || f.axis === 'y' || f.axis === 'z' ? f.axis : 'z';
-    f.len = Math.min(1, Math.max(0.01, Math.abs(b - a)));
-    f[axis] = (a + b) / 2;
-  }
-  delete f.s0;
-  delete f.s1;
-  if (!Number.isFinite(f.len)) f.len = 0.25;
-  f.len = Math.min(1, Math.max(0.01, f.len));
-}
-
-/**
- * @param {Partial<Force>} [partial]
- * @returns {Force}
- */
-export function createForce(partial = {}) {
-  const type = partial.type ?? 'point_load';
-  /** @type {Force} */
-  const base = {
-    id: nextId('force'),
-    type,
-    x: 0.5,
-    y: 1,
-    z: 0.5,
-    fx: 0,
-    fy: -1,
-    fz: 0,
-    magnitude: 1,
-    radius: type === 'pressure' ? 0.12 : 0.04,
-    shape: 'sphere',
-    hx: 0.1,
-    hy: 0.1,
-    hz: 0.1,
-    pressureMode: 'radial',
-    inward: false,
-    cavityVoid: true,
-    wall: 2,
-    axes: 1,
-    dirs: [],
-    axesMode: 'cases',
-  };
-  const out = { ...base, ...stripUndefined(partial) };
-  if (type === 'point_load' && out.axes > 1 && !(out.dirs?.length >= out.axes)) {
-    out.dirs = pointLoadDirs(out);
-  }
-  return out;
-}
-
-/**
- * Convenience: a bolt hole that is only a LOAD application point (all axes free).
- * @param {Partial<Fixation>} partial
+ * A bolt hole that is only a load application point (all axes free).
+ * @param {Record<string, any>} [partial]
  */
 export function createLoadedHole(partial = {}) {
-  return createFixation({
-    type: 'bolt_hole',
+  return createComponent('bolt_hole', {
     fixX: false,
     fixY: false,
     fixZ: false,
@@ -244,40 +72,27 @@ export function createLoadedHole(partial = {}) {
   });
 }
 
-/** @param {Record<string, any>} obj */
-function stripUndefined(obj) {
-  const out = {};
-  for (const k of Object.keys(obj)) if (obj[k] !== undefined) out[k] = obj[k];
-  return out;
+/** @returns {Scene} */
+export function createEmptyScene() {
+  return {
+    version: 3,
+    components: [],
+    links: [],
+    workingVolume: createDefaultWorkingVolume(),
+  };
 }
 
 /** @param {Scene | null | undefined} scene */
 export function isSceneEmpty(scene) {
-  return !scene || ((scene.fixations?.length ?? 0) === 0 && (scene.forces?.length ?? 0) === 0);
+  return !scene || (scene.components?.length ?? 0) === 0;
 }
 
 /**
- * Bring any scene (old saves, undo snapshots, hand-built) to the current schema.
- * Idempotent; mutates and returns the scene.
- *
- *  - legacy `bolt_bearing` forces are merged into the colocated bolt_hole (its
- *    load axes are un-fixed so the load actually transmits) or become a free
- *    loaded hole; links are re-pointed.
- *  - legacy 'distance' links become rigid offset links.
- *  - missing bolt-hole / pressure fields get defaults.
- *
- * @param {Scene | null | undefined} scene
- * @returns {Scene}
+ * Fold legacy `bolt_bearing` forces into the colocated bolt hole, or into a new
+ * free hole. Returns id remap (bearing id → hole id). Mutates the two arrays.
+ * @param {{ fixations: any[], forces: any[] }} scene
  */
-export function normalizeScene(scene) {
-  if (!scene) return createEmptyScene();
-  if (!Array.isArray(scene.fixations)) scene.fixations = [];
-  if (!Array.isArray(scene.forces)) scene.forces = [];
-  if (!scene.workingVolume) scene.workingVolume = createDefaultWorkingVolume();
-  ensureLinks(scene);
-  scene.version = 2;
-
-  // --- legacy bolt_bearing → hole load ---
+function mergeBoltBearings(scene) {
   /** @type {Map<string, string>} */
   const remap = new Map();
   const keep = [];
@@ -291,7 +106,7 @@ export function normalizeScene(scene) {
     const dir = [(f.fx || 0) / len, (f.fy || 0) / len, (f.fz || 0) / len];
     let hole = scene.fixations.find(
       (h) =>
-        h.type === 'bolt_hole' &&
+        h?.type === 'bolt_hole' &&
         validAxis(h.axis) === axis &&
         (h.loadMode ?? 'none') === 'none' &&
         Math.hypot(h.x - f.x, h.y - f.y, h.z - f.z) <= 0.04,
@@ -301,8 +116,7 @@ export function normalizeScene(scene) {
       if (Math.abs(dir[1]) > 1e-3) hole.fixY = false;
       if (Math.abs(dir[2]) > 1e-3) hole.fixZ = false;
     } else {
-      hole = createFixation({
-        type: 'bolt_hole',
+      hole = createComponent('bolt_hole', {
         x: f.x,
         y: f.y,
         z: f.z,
@@ -319,15 +133,22 @@ export function normalizeScene(scene) {
     hole.fy = f.fy ?? -1;
     hole.fz = f.fz ?? 0;
     hole.magnitude = Number.isFinite(f.magnitude) ? f.magnitude : 1;
-    remap.set(f.id, hole.id);
+    if (f.id) remap.set(f.id, hole.id);
   }
   scene.forces = keep;
+  return remap;
+}
 
-  // --- links: legacy conversion + re-point ---
+/**
+ * Legacy `distance` links become rigid offset links. Rigid links are kept.
+ * Runs before per-type normalize so a span migration does not change the stored offset.
+ * @param {Scene} scene
+ * @param {Map<string, string>} remap
+ */
+function repairLinks(scene, remap) {
   const features = new Map();
-  for (const f of scene.fixations) features.set(f.id, f);
-  for (const f of scene.forces) features.set(f.id, f);
-  scene.links = scene.links
+  for (const c of scene.components) if (c?.id) features.set(c.id, c);
+  scene.links = ensureLinks(scene)
     .map((l) => {
       const aId = remap.get(l.aId) ?? l.aId;
       const bId = remap.get(l.bId) ?? l.bId;
@@ -345,34 +166,42 @@ export function normalizeScene(scene) {
       });
     })
     .filter((l) => l && l.aId !== l.bId);
+}
 
-  // --- field defaults ---
-  for (const f of scene.fixations) {
-    if (f.type !== 'bolt_hole') continue;
-    if (!BOLT_LOAD_MODES.includes(f.loadMode)) f.loadMode = 'none';
-    if (!Array.isArray(f.loads)) f.loads = [];
-    // Legacy absolute span -> length centred on the hole (no-op for current scenes).
-    // (a legacy hole with neither len nor span was full-axis)
-    if (!Number.isFinite(f.len) && !Number.isFinite(f.s0) && !Number.isFinite(f.s1)) f.len = 1;
-    migrateHoleSpan(f, Number.isFinite(f.len));
-    if (f.circMode !== 'radial') f.circMode = 'torque';
-    if (!Number.isFinite(f.fx)) f.fx = 0;
-    if (!Number.isFinite(f.fy)) f.fy = -1;
-    if (!Number.isFinite(f.fz)) f.fz = 0;
-    if (!Number.isFinite(f.magnitude)) f.magnitude = 1;
-  }
-  for (const f of scene.forces) {
-    if (f.type === 'point_load') {
-      f.axes = pointLoadAxes(f);
-      f.axesMode = pointLoadMode(f);
-      f.dirs = f.axes > 1 ? pointLoadDirs(f) : Array.isArray(f.dirs) ? f.dirs.filter((d) => POINT_DIRS.includes(d)) : [];
-      continue;
-    }
-    if (f.type !== 'pressure') continue;
-    if (typeof f.cavityVoid !== 'boolean') f.cavityVoid = true;
-    if (!Number.isFinite(f.wall)) f.wall = 2;
+/**
+ * Bring any scene (old saves, undo snapshots, hand-built) to v3.
+ * Idempotent. Mutates and returns the scene.
+ *
+ * v1 and v2 store `fixations` and `forces`. Those lists are concatenated,
+ * supports first, then loads, and then deleted.
+ *
+ * @param {Scene | Record<string, any> | null | undefined} scene
+ * @returns {Scene}
+ */
+export function normalizeScene(scene) {
+  if (!scene || typeof scene !== 'object') return createEmptyScene();
+
+  /** @type {Map<string, string>} */
+  let remap = new Map();
+  if (Array.isArray(scene.fixations) || Array.isArray(scene.forces)) {
+    if (!Array.isArray(scene.fixations)) scene.fixations = [];
+    if (!Array.isArray(scene.forces)) scene.forces = [];
+    remap = mergeBoltBearings(scene);
+    scene.components = [...scene.fixations, ...scene.forces].filter(Boolean);
+    delete scene.fixations;
+    delete scene.forces;
   }
 
+  if (!Array.isArray(scene.components)) scene.components = [];
+  scene.components = scene.components.filter((c) => c && componentDef(c.type));
+  repairLinks(scene, remap);
+  for (const c of scene.components) componentDef(c.type).normalize(c);
+  reserveIds(scene.components);
+
+  if (!scene.workingVolume) scene.workingVolume = createDefaultWorkingVolume();
+  if (!scene.workingVolume.shape) scene.workingVolume.shape = 'box';
+  ensureLinks(scene);
   pruneLinks(scene);
+  scene.version = 3;
   return scene;
 }

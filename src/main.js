@@ -223,8 +223,8 @@ const gizmos = createSceneGizmoController({
   onDragMove: () => updateDesignVolume(designVolume, config),
   onSelect: (sel) => {
     if (sel) volumeGizmo?.deselect();
-    if (sel) ui?.sceneEditor?.selectItem(sel.kind, sel.id, { fromGizmo: true });
-    else ui?.sceneEditor?.selectItem(null, null, { fromGizmo: true });
+    if (sel) ui?.sceneEditor?.selectItem(sel.id, { fromGizmo: true });
+    else ui?.sceneEditor?.selectItem(null, { fromGizmo: true });
   },
 });
 
@@ -237,7 +237,7 @@ volumeGizmo = createVolumeGizmo({
   getConfig: () => config,
   onSelect: () => {
     gizmos.selectById(null);
-    ui?.sceneEditor?.selectItem(null, null, { fromGizmo: true });
+    ui?.sceneEditor?.selectItem(null, { fromGizmo: true });
   },
   onPreview: (b) => {
     updateDesignVolume(designVolume, config, b);

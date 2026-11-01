@@ -12,8 +12,7 @@ import { buildPassiveMask } from '../src/scene/passiveVoids.js';
 import { SCENE_EXAMPLES } from '../src/scene/templates.js';
 import {
   createEmptyScene,
-  createFixation,
-  createForce,
+  createComponent,
   createLoadedHole,
   normalizeScene,
 } from '../src/scene/types.js';
@@ -55,14 +54,14 @@ console.log('\n[hole loads]');
     createLoadedHole({ x: 0.5, y: 0.5, z: 0.5, axis: 'z', radius: 0.06, ...extra });
 
   let sc = createEmptyScene();
-  sc.fixations.push(hole({ loadMode: 'directional', fx: 0, fy: -1, fz: 0, magnitude: 2 }));
+  sc.components.push(hole({ loadMode: 'directional', fx: 0, fy: -1, fz: 0, magnitude: 2 }));
   let r = bcs(sc, PLATE);
   let s = sumF(r.F, r.fixed);
   ok(near(s[1], -2, 1e-2) && near(s[0], 0, 1e-2), `directional resultant = (0,-2,0) → (${s.map((v) => v.toFixed(3))})`);
   ok(r.loadedNodes > 0, `loads land on ${r.loadedNodes} bore nodes`);
 
   sc = createEmptyScene();
-  sc.fixations.push(
+  sc.components.push(
     hole({
       loadMode: 'multi',
       loads: [
@@ -76,7 +75,7 @@ console.log('\n[hole loads]');
   ok(near(s[0], 0.5, 1e-2) && near(s[1], -1, 1e-2), `multi resultant = (0.5,-1,0) → (${s.map((v) => v.toFixed(3))})`);
 
   sc = createEmptyScene();
-  sc.fixations.push(hole({ loadMode: 'circular', circMode: 'torque', magnitude: 1 }));
+  sc.components.push(hole({ loadMode: 'circular', circMode: 'torque', magnitude: 1 }));
   r = bcs(sc, PLATE);
   s = sumF(r.F, r.fixed);
   ok(Math.hypot(...s) < 1e-3, `torque is self-balanced (net force ≈ 0): ${s.map((v) => v.toFixed(5))}`);
@@ -95,21 +94,21 @@ console.log('\n[hole loads]');
   ok(Mz > 0.5 && absF > 0.9, `torque produces CCW moment about axis (Mz=${Mz.toFixed(2)}, Σ|F|=${absF.toFixed(2)})`);
 
   sc = createEmptyScene();
-  sc.fixations.push(hole({ loadMode: 'circular', circMode: 'radial', magnitude: 1 }));
+  sc.components.push(hole({ loadMode: 'circular', circMode: 'radial', magnitude: 1 }));
   r = bcs(sc, PLATE);
   s = sumF(r.F, r.fixed);
   ok(Math.hypot(...s) < 1e-3, 'radial press-fit is self-balanced');
 
   // Clamped hole absorbing its own load must warn
   sc = createEmptyScene();
-  sc.fixations.push(createFixation({ type: 'bolt_hole', x: 0.5, y: 0.5, z: 0.5, loadMode: 'directional', fy: -1 }));
+  sc.components.push(createComponent('bolt_hole', { x: 0.5, y: 0.5, z: 0.5, loadMode: 'directional', fy: -1 }));
   const an = analyzeScene(sc, PLATE);
   ok(an.warnings.some((w) => w.includes('absorbed')), `fixed-axis load warns: "${an.warnings[0]}"`);
 
   // Axis unfixed along the load → no absorption warning
   sc = createEmptyScene();
-  sc.fixations.push(createFixation({ type: 'bolt_hole', x: 0.2, y: 0.5, z: 0.5 }));
-  sc.fixations.push(hole({ x: 0.8, loadMode: 'directional', fy: -1 }));
+  sc.components.push(createComponent('bolt_hole', { x: 0.2, y: 0.5, z: 0.5 }));
+  sc.components.push(hole({ x: 0.8, loadMode: 'directional', fy: -1 }));
   ok(analyzeScene(sc, PLATE).warnings.length === 0, 'free hole + clamped hole → no warnings');
 }
 
@@ -117,10 +116,10 @@ console.log('\n[hole loads]');
 console.log('\n[links]');
 {
   const sc = createEmptyScene();
-  const a = createFixation({ type: 'bolt_hole', x: 0.2, y: 0.5, z: 0.5 });
-  const b = createFixation({ type: 'bolt_hole', x: 0.8, y: 0.4, z: 0.5 });
-  const c = createFixation({ type: 'bolt_hole', x: 0.5, y: 0.8, z: 0.5 });
-  sc.fixations.push(a, b, c);
+  const a = createComponent('bolt_hole', { x: 0.2, y: 0.5, z: 0.5 });
+  const b = createComponent('bolt_hole', { x: 0.8, y: 0.4, z: 0.5 });
+  const c = createComponent('bolt_hole', { x: 0.5, y: 0.8, z: 0.5 });
+  sc.components.push(a, b, c);
   const l1 = linkFeatures(sc, a.id, b.id, PLATE);
   linkFeatures(sc, b.id, c.id, PLATE);
   ok(!!l1 && near(l1.dx, 0.6, 0.03) && near(l1.dy, -0.1, 0.07), `offset stored (dx=${l1.dx.toFixed(3)}, dy=${l1.dy.toFixed(3)}) — diagonal allowed`);
@@ -151,12 +150,44 @@ console.log('\n[legacy migration]');
     links: [{ id: 'l1', type: 'distance', aId: 'f1', bId: 'b1', distance: 0.6, axis: 'x' }],
   };
   const sc = normalizeScene(legacy);
-  const f2 = sc.fixations.find((f) => f.id === 'f2');
-  ok(!sc.forces.some((f) => f.type === 'bolt_bearing'), 'bolt_bearing removed');
+  const f2 = sc.components.find((f) => f.id === 'f2');
+  ok(!sc.components.some((f) => f.type === 'bolt_bearing'), 'bolt_bearing removed');
   ok(f2.loadMode === 'directional' && f2.fixY === false && f2.fixX === true, 'bearing merged into colocated hole; load axis freed');
   ok(sc.links.length === 1 && sc.links[0].type === 'rigid' && sc.links[0].bId === 'f2', 'distance link → rigid link on the hole');
+  ok(sc.version === 3 && sc.workingVolume.shape === 'box', 'legacy scene is v3 with a box working volume');
+  ok(!('fixations' in sc) && !('forces' in sc), 'legacy lists are removed');
   const again = JSON.stringify(normalizeScene(JSON.parse(JSON.stringify(sc))));
   ok(again === JSON.stringify(sc), 'normalizeScene is idempotent');
+
+  const v2 = {
+    version: 2,
+    fixations: [{ id: 'fix_7', type: 'rest_point', x: 0.2, y: 0, z: 0.5, radius: 0.03 }],
+    forces: [{ id: 'force_9', type: 'point_load', x: 0.5, y: 1, z: 0.5 }],
+  };
+  const fromV2 = normalizeScene(JSON.parse(JSON.stringify(v2)));
+  const fromV2Again = normalizeScene(JSON.parse(JSON.stringify(fromV2)));
+  ok(JSON.stringify(fromV2) === JSON.stringify(fromV2Again), 'v2 normalize is idempotent');
+  ok(fromV2.components.length === 2 && fromV2.components[0].id === 'fix_7' && fromV2.components[1].id === 'force_9', 'v2 lists concatenate supports then loads');
+
+  const warm = createComponent('rest_point');
+  const n = Number(String(warm.id).split('_').pop());
+  const loaded = normalizeScene({
+    version: 2,
+    fixations: [{ id: `fix_${n + 5}`, type: 'rest_point', x: 0.2, y: 0, z: 0.5, radius: 0.03 }],
+    forces: [{ id: `force_${n + 8}`, type: 'point_load', x: 0.5, y: 1, z: 0.5 }],
+  });
+  const next = createComponent('wall_pad');
+  const nextN = Number(String(next.id).split('_').pop());
+  ok(nextN > n + 8 && !loaded.components.some((c) => c.id === next.id), `id counter reserved past loaded ids (${next.id})`);
+
+  const dropped = normalizeScene({
+    version: 2,
+    fixations: [{ id: 'fix_1', type: 'nope', x: 0, y: 0, z: 0 }],
+    forces: [{ id: 'force_2', type: 'point_load', x: 0.2, y: 1, z: 0.2 }],
+  });
+  ok(dropped.components.length === 1 && dropped.components[0].type === 'point_load', 'unknown type is dropped');
+  const droppedAgain = JSON.stringify(normalizeScene(JSON.parse(JSON.stringify(dropped))));
+  ok(droppedAgain === JSON.stringify(dropped), 'normalize stays idempotent after a drop');
 }
 
 /* ------------------------------------------------------------------ */
@@ -164,7 +195,7 @@ console.log('\n[auto working volume]');
 {
   const dims = { nx: 32, ny: 32, nz: 32 };
   const sc = createEmptyScene();
-  sc.forces.push(createForce({ type: 'pressure', shape: 'sphere', x: 0.5, y: 0.8, z: 0.5, radius: 0.2, wall: 3 }));
+  sc.components.push(createComponent('pressure', { shape: 'sphere', x: 0.5, y: 0.8, z: 0.5, radius: 0.2, wall: 3 }));
   const b = computeAutoWorkingBounds(sc, 0, dims);
   const maxDim = 32;
   const R = 0.2 * maxDim + 3; // cavity + wall (cells)
@@ -183,8 +214,11 @@ for (const ex of SCENE_EXAMPLES) {
   const dims = { nx, ny, nz };
   const scene = normalizeScene(ex.build());
   scene.workingVolume.mode = 'auto';
+  ok(scene.version === 3 && scene.workingVolume.shape === 'box' && Array.isArray(scene.components), 'scene is v3');
+  const builtAgain = JSON.stringify(normalizeScene(JSON.parse(JSON.stringify(scene))));
+  ok(builtAgain === JSON.stringify(scene), 'example normalize is idempotent');
 
-  ok(!scene.forces.some((f) => f.type === 'bolt_bearing'), 'no legacy bearing forces');
+  ok(!scene.components.some((f) => f.type === 'bolt_bearing'), 'no legacy bearing forces');
   const an = analyzeScene(scene, dims);
   ok(an.warnings.length === 0, `no warnings${an.warnings.length ? `: ${an.warnings.join(' | ')}` : ''}`);
   ok(an.absorbed < 0.02, `load absorbed by fixed DOFs: ${(an.absorbed * 100).toFixed(1)}%`);
@@ -216,7 +250,7 @@ for (const ex of SCENE_EXAMPLES) {
   // (Wall pads fix whole face patches incl. nodes inside a bore that crosses the face; those
   //  carry no material and are harmless, so they are excluded from this check.)
   const noPads = JSON.parse(JSON.stringify(scene));
-  noPads.fixations = noPads.fixations.filter((f) => f.type !== 'wall_pad');
+  noPads.components = noPads.components.filter((f) => f.type !== 'wall_pad');
   const r = bcs(noPads, dims);
   let detached = 0;
   let touched = 0;
@@ -243,7 +277,7 @@ for (const ex of SCENE_EXAMPLES) {
 
   if (ex.id === 'gas_cylinder') {
     ok(net[1] > 0.5, 'lid thrust gives the bolts a net axial load');
-    const hasPressure = scene.forces.filter((f) => f.type === 'pressure').length === 2;
+    const hasPressure = scene.components.filter((f) => f.type === 'pressure').length === 2;
     ok(hasPressure, 'radial + lid-thrust pressure objects present');
   }
 

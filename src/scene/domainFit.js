@@ -1,3 +1,4 @@
+import { componentDef, orderedFeatures } from './components/index.js';
 import { resolveFitBounds } from './workingVolume.js';
 import { createEmptyScene, isSceneEmpty } from './types.js';
 
@@ -76,26 +77,10 @@ export function cropSceneToWorkingVolume(scene, dims) {
     if (Number.isFinite(f.z)) f.z = clamp01((f.z - b.z0) / rz);
   };
 
-  for (const f of out.fixations ?? []) {
+  for (const f of orderedFeatures(out)) {
+    if (!f) continue;
     pos(f);
-    if (Number.isFinite(f.radius)) f.radius *= radiusK;
-    if (f.type === 'bolt_hole' && Number.isFinite(f.len)) {
-      const ax = f.axis === 'x' || f.axis === 'y' || f.axis === 'z' ? f.axis : 'z';
-      f.len = Math.min(1, f.len / range[ax]);
-    }
-    if (f.type === 'wall_pad') {
-      const axis = (f.face ?? 'x-')[0];
-      const [pa, pb] = axis === 'x' ? ['y', 'z'] : axis === 'y' ? ['x', 'z'] : ['x', 'y'];
-      if (Number.isFinite(f.width)) f.width = Math.min(1, f.width / range[pa]);
-      if (Number.isFinite(f.height)) f.height = Math.min(1, f.height / range[pb]);
-    }
-  }
-  for (const f of out.forces ?? []) {
-    pos(f);
-    if (Number.isFinite(f.radius)) f.radius *= radiusK;
-    if (Number.isFinite(f.hx)) f.hx /= rx;
-    if (Number.isFinite(f.hy)) f.hy /= ry;
-    if (Number.isFinite(f.hz)) f.hz /= rz;
+    componentDef(f.type)?.crop?.(f, { b, range, radiusK });
   }
   for (const l of out.links ?? []) {
     if (Number.isFinite(l.dx)) l.dx /= rx;
@@ -104,6 +89,7 @@ export function cropSceneToWorkingVolume(scene, dims) {
   }
   out.workingVolume = {
     ...(out.workingVolume ?? {}),
+    shape: out.workingVolume?.shape ?? 'box',
     mode: 'full',
     bounds: { x0: 0, x1: 1, y0: 0, y1: 1, z0: 0, z1: 1 },
   };
