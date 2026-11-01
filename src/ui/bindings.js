@@ -511,7 +511,9 @@ export function bindAll({
       z: Math.max(1e-3, (bounds.z1 - bounds.z0) * config.nz),
     };
     const d = fitDimsForBudget(size, currentBudget());
-    el.textContent = `Box → ${d.nx} × ${d.ny} × ${d.nz} = ${(d.nx * d.ny * d.nz).toLocaleString()} cubic voxels`;
+    const shape = config.scene?.workingVolume?.shape;
+    const name = shape === 'sphere' ? 'Sphere' : shape === 'cylinder' ? 'Cylinder' : 'Box';
+    el.textContent = `${name} → ${d.nx} × ${d.ny} × ${d.nz} = ${(d.nx * d.ny * d.nz).toLocaleString()} cubic voxels`;
   }
 
   /** Corner drag released: crop / grow the domain to the box and mesh it at the preset budget. */
