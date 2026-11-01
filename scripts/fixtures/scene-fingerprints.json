@@ -1,0 +1,77 @@
+{
+  "algorithm": "sha256 of JSON: per load case little-endian fixedDofs and F hex, passive mask hex or null, auto bounds rounded to 1e-9, glyphs with id removed and keys sorted",
+  "cases": [
+    {
+      "id": "two_bolt_bracket",
+      "dims": [
+        36,
+        15,
+        8
+      ],
+      "sha256": "568df53198ae42327fb4b83369d779da8e9eb547be58553c56f16f957031bf14"
+    },
+    {
+      "id": "l_bracket",
+      "dims": [
+        36,
+        15,
+        8
+      ],
+      "sha256": "3b2d118b51524200a38caa5fee3aa5a49919063ec050521fc553c3ea6f9c18ac"
+    },
+    {
+      "id": "engine_mount",
+      "dims": [
+        36,
+        15,
+        8
+      ],
+      "sha256": "8cce5d6c4be9d1202056065b56a61900fb354f9de131b5a6b82c3974d13cca2f"
+    },
+    {
+      "id": "torque_arm",
+      "dims": [
+        36,
+        15,
+        8
+      ],
+      "sha256": "dca7b9741e57ccd836070f7cd72f176a4cb7d46e5b22c0ecd1d0b5860c2536b2"
+    },
+    {
+      "id": "gas_cylinder",
+      "dims": [
+        32,
+        32,
+        32
+      ],
+      "sha256": "65fb5ca0204b31c1d5e6fdb36d54f32e4e36acd15707606bedaf78df726a0b1f"
+    },
+    {
+      "id": "bolt_bracket",
+      "dims": [
+        36,
+        15,
+        8
+      ],
+      "sha256": "2f2f541b6c85e2b3b0d3d19b809bfbc532a96360550a0da974211725e808608a"
+    },
+    {
+      "id": "pressure_bridge",
+      "dims": [
+        48,
+        24,
+        16
+      ],
+      "sha256": "823b24a28f4881ca813cad4569448599a84473f9475bc66e4799310527fc5fad"
+    },
+    {
+      "id": "legacy_v1_bolt_bearing",
+      "dims": [
+        36,
+        15,
+        8
+      ],
+      "sha256": "b158585d6fa1465d48dc4763ba848002821b9302e0a027529bc0b9473dc43b8a"
+    }
+  ]
+}
