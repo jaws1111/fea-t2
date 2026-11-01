@@ -1,4 +1,4 @@
-import { createEmptyScene, createFixation, createForce, createLoadedHole } from './types.js';
+import { createEmptyScene, createComponent, createLoadedHole } from './types.js';
 import { linkFeatures } from './links.js';
 
 /*
@@ -33,7 +33,7 @@ const PLATE = '36x15x8';
 export function createTwoBoltBracketScene() {
   const scene = createEmptyScene();
   const r = 0.05;
-  const left = createFixation({ type: 'bolt_hole', x: 0.16, y: 0.5, z: 0.5, axis: 'z', len: 1, radius: r });
+  const left = createComponent('bolt_hole', { x: 0.16, y: 0.5, z: 0.5, axis: 'z', len: 1, radius: r });
   const right = createLoadedHole({
     x: 0.84,
     y: 0.5,
@@ -46,7 +46,7 @@ export function createTwoBoltBracketScene() {
     fz: 0,
     magnitude: 1,
   });
-  scene.fixations.push(left, right);
+  scene.components.push(left, right);
   linkFeatures(scene, left.id, right.id, { nx: 36, ny: 15, nz: 8 });
   return scene;
 }
@@ -54,8 +54,8 @@ export function createTwoBoltBracketScene() {
 /** Wall-mounted cantilever with a loaded pin at the tip (load sideways AND down — 'multi'). */
 export function createBoltBracketScene() {
   const scene = createEmptyScene();
-  scene.fixations.push(
-    createFixation({ type: 'wall_pad', face: 'x-', x: 0, y: 0.5, z: 0.5, width: 1, height: 1, depth: 2 }),
+  scene.components.push(
+    createComponent('wall_pad', { face: 'x-', x: 0, y: 0.5, z: 0.5, width: 1, height: 1, depth: 2 }),
     createLoadedHole({
       x: 0.86,
       y: 0.5,
@@ -78,13 +78,12 @@ export function createBoltBracketScene() {
  */
 export function createPressureBridgeScene() {
   const scene = createEmptyScene();
-  scene.fixations.push(
-    createFixation({ type: 'rest_point', x: 0.06, y: 0, z: 0.5, radius: 0.05 }),
-    createFixation({ type: 'rest_point', x: 0.94, y: 0, z: 0.5, radius: 0.05 }),
+  scene.components.push(
+    createComponent('rest_point', { x: 0.06, y: 0, z: 0.5, radius: 0.05 }),
+    createComponent('rest_point', { x: 0.94, y: 0, z: 0.5, radius: 0.05 }),
   );
-  scene.forces.push(
-    createForce({
-      type: 'pressure',
+  scene.components.push(
+    createComponent('pressure', {
       shape: 'box',
       x: 0.5,
       y: 0.62,
@@ -122,9 +121,8 @@ export function createGasCylinderScene() {
   const bolts = 6;
   for (let i = 0; i < bolts; i++) {
     const a = (i / bolts) * Math.PI * 2;
-    scene.fixations.push(
-      createFixation({
-        type: 'bolt_hole',
+    scene.components.push(
+      createComponent('bolt_hole', {
         x: cx + ringR * Math.cos(a),
         y: 0.1,
         z: cz + ringR * Math.sin(a),
@@ -135,8 +133,7 @@ export function createGasCylinderScene() {
       }),
     );
   }
-  const gas = createForce({
-    type: 'pressure',
+  const gas = createComponent('pressure', {
     shape: 'sphere',
     x: cx,
     y: 0.56,
@@ -146,8 +143,7 @@ export function createGasCylinderScene() {
     magnitude: 1,
     wall: 2,
   });
-  const lid = createForce({
-    type: 'pressure',
+  const lid = createComponent('pressure', {
     shape: 'sphere',
     x: cx,
     y: 0.56,
@@ -160,7 +156,7 @@ export function createGasCylinderScene() {
     magnitude: 0.8,
     wall: 2,
   });
-  scene.forces.push(gas, lid);
+  scene.components.push(gas, lid);
   linkFeatures(scene, gas.id, lid.id, { nx: 32, ny: 32, nz: 32 });
   return scene;
 }
@@ -173,14 +169,12 @@ export function createGasCylinderScene() {
  */
 export function createLBracketScene() {
   const scene = createEmptyScene();
-  scene.fixations.push(
-    createFixation({ type: 'wall_pad', face: 'x-', x: 0, y: 0.5, z: 0.5, width: 0.9, height: 1, depth: 2 }),
+  scene.components.push(
+    createComponent('wall_pad', { face: 'x-', x: 0, y: 0.5, z: 0.5, width: 0.9, height: 1, depth: 2 }),
   );
-  const b1 = createFixation({
-    type: 'bolt_hole', x: 0.12, y: 0.3, z: 0.5, axis: 'x', s0: 0, s1: 0.25, radius: 0.03,
+  const b1 = createComponent('bolt_hole', { x: 0.12, y: 0.3, z: 0.5, axis: 'x', s0: 0, s1: 0.25, radius: 0.03,
   });
-  const b2 = createFixation({
-    type: 'bolt_hole', x: 0.12, y: 0.75, z: 0.5, axis: 'x', s0: 0, s1: 0.25, radius: 0.03,
+  const b2 = createComponent('bolt_hole', { x: 0.12, y: 0.75, z: 0.5, axis: 'x', s0: 0, s1: 0.25, radius: 0.03,
   });
   const tip = createLoadedHole({
     x: 0.9,
@@ -194,7 +188,7 @@ export function createLBracketScene() {
     fz: 0,
     magnitude: 1,
   });
-  scene.fixations.push(b1, b2, tip);
+  scene.components.push(b1, b2, tip);
   linkFeatures(scene, b1.id, b2.id, { nx: 36, ny: 15, nz: 8 });
   return scene;
 }
@@ -206,8 +200,8 @@ export function createLBracketScene() {
  */
 export function createEngineMountScene() {
   const scene = createEmptyScene();
-  scene.fixations.push(
-    createFixation({ type: 'wall_pad', face: 'x-', x: 0, y: 0.5, z: 0.5, width: 1, height: 1, depth: 2 }),
+  scene.components.push(
+    createComponent('wall_pad', { face: 'x-', x: 0, y: 0.5, z: 0.5, width: 1, height: 1, depth: 2 }),
   );
   const mk = (y) =>
     createLoadedHole({
@@ -224,7 +218,7 @@ export function createEngineMountScene() {
     });
   const a = mk(0.26);
   const b = mk(0.74);
-  scene.fixations.push(a, b);
+  scene.components.push(a, b);
   linkFeatures(scene, a.id, b.id, { nx: 36, ny: 15, nz: 8 });
   return scene;
 }
@@ -246,9 +240,9 @@ export function createTorqueArmScene() {
     circMode: 'torque',
     magnitude: 1,
   });
-  const l = createFixation({ type: 'bolt_hole', x: 0.1, y: 0.5, z: 0.5, axis: 'z', len: 1, radius: 0.04 });
-  const r = createFixation({ type: 'bolt_hole', x: 0.9, y: 0.5, z: 0.5, axis: 'z', len: 1, radius: 0.04 });
-  scene.fixations.push(shaft, l, r);
+  const l = createComponent('bolt_hole', { x: 0.1, y: 0.5, z: 0.5, axis: 'z', len: 1, radius: 0.04 });
+  const r = createComponent('bolt_hole', { x: 0.9, y: 0.5, z: 0.5, axis: 'z', len: 1, radius: 0.04 });
+  scene.components.push(shaft, l, r);
   linkFeatures(scene, l.id, r.id, { nx: 36, ny: 15, nz: 8 });
   return scene;
 }

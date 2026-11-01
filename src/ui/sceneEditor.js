@@ -1,11 +1,11 @@
 import {
   createEmptyScene,
-  createFixation,
-  createForce,
+  createComponent,
   createLoadedHole,
   isSceneEmpty,
   normalizeScene,
 } from '../scene/types.js';
+import { componentDef, FAMILIES } from '../scene/components/index.js';
 import { SCENE_EXAMPLES } from '../scene/templates.js';
 import {
   computeAutoWorkingBounds,
@@ -16,7 +16,7 @@ import {
 import {
   applyLinksAfterMove,
   ensureLinks,
-  findFeatureById,
+  findComponent,
   linkFeatures,
   linkLengthCells,
   linksOf,
@@ -34,17 +34,6 @@ import {
 } from '../scene/pointLoad.js';
 
 const $ = (id) => document.getElementById(id);
-
-const FIX_LABELS = {
-  rest_point: 'Rest',
-  bolt_hole: 'Bolt hole',
-  wall_pad: 'Wall pad',
-};
-
-const FORCE_LABELS = {
-  point_load: 'Point load',
-  pressure: 'Pressure',
-};
 
 const MAX_UNDO = 40;
 /** Default spread (fraction of the longest side) of a multi-axis point load. */
@@ -82,7 +71,7 @@ function holeSummary(f) {
  *   onApply: () => void,
  *   onChange?: () => void,
  *   onTabChange?: (name: 'optimize'|'scene') => void,
- *   onSelect?: (sel: { kind: 'fixation'|'force', id: string } | null) => void,
+ *   onSelect?: (sel: { id: string } | null) => void,
  *   onClear?: () => void,
  *   onResolution?: (key: string) => void,
  *   onFitDomain?: () => void,
@@ -95,7 +84,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
 
   const dims = () => ({ nx: config.nx, ny: config.ny, nz: config.nz });
 
-  /** @type {{ kind: 'fixation'|'force', id: string } | null} */
+  /** @type {{ id: string } | null} */
   let selected = null;
   /** @type {import('../scene/types.js').Scene[]} */
   const undoStack = [];
@@ -162,46 +151,48 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
 
   /* ------------------------------ Object list ------------------------------ */
   function featureName(f) {
-    const base = FIX_LABELS[f.type] ?? FORCE_LABELS[f.type] ?? f.type;
+    const base = componentDef(f.type)?.label ?? f.type;
     return `${base} @ ${f.x.toFixed(2)},${f.y.toFixed(2)},${f.z.toFixed(2)}`;
   }
 
-  function allObjects() {
-    const scene = ensureScene();
-    const rows = [];
-    for (const f of scene.fixations ?? []) {
-      let badge = 'fix';
-      let meta = '';
-      let label = FIX_LABELS[f.type] ?? f.type;
-      if (f.type === 'bolt_hole') {
-        const loaded = f.loadMode && f.loadMode !== 'none';
-        const anyFixed = f.fixX !== false || f.fixY !== false || f.fixZ !== false;
-        badge = loaded && anyFixed ? 'fix+load' : loaded ? 'load' : 'fix';
-        label = `Bolt ⌀${(f.radius * Math.max(config.nx, config.ny, config.nz) * 2).toFixed(1)} ${f.axis.toUpperCase()}`;
-        meta = holeSummary(f);
-      } else if (f.type === 'wall_pad') {
-        meta = f.face;
-      } else {
-        meta = `${f.x.toFixed(2)}, ${f.y.toFixed(2)}`;
-      }
-      const linked = linksOf(scene, f.id).length ? ' 🔗' : '';
-      rows.push({ kind: 'fixation', id: f.id, label: label + linked, meta, badge });
-    }
-    for (const f of scene.forces ?? []) {
-      const linked = linksOf(scene, f.id).length ? ' 🔗' : '';
+  function badgeFor(f) {
+    const roles = componentDef(f.type)?.roles(f) ?? { support: false, load: false };
+    if (roles.support && roles.load) return 'fix+load';
+    if (roles.load) return 'load';
+    return 'fix';
+  }
+
+  function rowFor(scene, f) {
+    let label = componentDef(f.type)?.label ?? f.type;
+    let meta = '';
+    if (f.type === 'bolt_hole') {
+      label = `Bolt ⌀${(f.radius * Math.max(config.nx, config.ny, config.nz) * 2).toFixed(1)} ${f.axis.toUpperCase()}`;
+      meta = holeSummary(f);
+    } else if (f.type === 'wall_pad') {
+      meta = f.face;
+    } else if (f.type === 'rest_point') {
+      meta = `${f.x.toFixed(2)}, ${f.y.toFixed(2)}`;
+    } else {
       const extra =
         f.type === 'pressure'
           ? ` · ${f.pressureMode === 'directional' ? 'dir' : 'radial'}`
           : f.type === 'point_load' && pointLoadAxes(f) > 1
             ? ` · ${pointLoadAxes(f)} axes`
             : '';
-      rows.push({
-        kind: 'force',
-        id: f.id,
-        label: (FORCE_LABELS[f.type] ?? f.type) + linked,
-        meta: `|F|=${Number(f.magnitude).toFixed(2)}${extra}`,
-        badge: 'load',
-      });
+      meta = `|F|=${Number(f.magnitude).toFixed(2)}${extra}`;
+    }
+    const linked = linksOf(scene, f.id).length ? ' 🔗' : '';
+    return { id: f.id, label: label + linked, meta, badge: badgeFor(f) };
+  }
+
+  function allObjects() {
+    const scene = ensureScene();
+    const rows = [];
+    for (const fam of FAMILIES) {
+      const members = (scene.components ?? []).filter((c) => componentDef(c.type)?.family === fam.id);
+      if (!members.length) continue;
+      rows.push({ header: fam.label });
+      for (const f of members) rows.push(rowFor(scene, f));
     }
     return rows;
   }
@@ -210,12 +201,15 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     const ul = $('list-scene-objects');
     if (!ul) return;
     const rows = allObjects();
-    if (!rows.length) {
+    if (!rows.some((r) => r.id)) {
       ul.innerHTML = `<li class="text-[11px] text-slate-500 px-1 py-1">No objects — add a support or load</li>`;
       return;
     }
     ul.innerHTML = rows
       .map((r) => {
+        if (r.header) {
+          return `<li class="px-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">${r.header}</li>`;
+        }
         const active = selected?.id === r.id ? 'is-active' : '';
         const badgeCls =
           r.badge === 'fix'
@@ -223,7 +217,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
             : r.badge === 'load'
               ? 'bg-rose-500/15 text-rose-300'
               : 'bg-amber-500/15 text-amber-300';
-        return `<li class="scene-item ${active}" data-kind="${r.kind}" data-id="${r.id}" tabindex="0">
+        return `<li class="scene-item ${active}" data-id="${r.id}" tabindex="0">
           <span class="flex min-w-0 items-center gap-1.5">
             <span class="shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${badgeCls}">${r.badge}</span>
             <span class="truncate">${r.label}</span>
@@ -237,8 +231,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
   function findSelected() {
     const scene = ensureScene();
     if (!selected) return null;
-    if (selected.kind === 'fixation') return scene.fixations.find((f) => f.id === selected.id) ?? null;
-    return scene.forces.find((f) => f.id === selected.id) ?? null;
+    return scene.components.find((f) => f.id === selected.id) ?? null;
   }
 
   /* ------------------------------ Inspector ------------------------------ */
@@ -429,7 +422,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     for (const l of links) {
       const otherId = l.aId === item.id ? l.bId : l.aId;
       linkedIds.add(otherId);
-      const other = findFeatureById(scene, otherId)?.feature;
+      const other = findComponent(scene, otherId);
       const sgn = l.aId === item.id ? 1 : -1; // show offset of partner relative to THIS item
       const cell = (key, n) => (sgn * l[key] * n).toFixed(1);
       html += `<div class="mb-1 rounded border border-slate-800 p-1.5">
@@ -447,7 +440,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
         </div>
       </div>`;
     }
-    const candidates = [...(scene.fixations ?? []), ...(scene.forces ?? [])].filter((f) => !linkedIds.has(f.id));
+    const candidates = (scene.components ?? []).filter((f) => !linkedIds.has(f.id));
     if (candidates.length) {
       html += `<label class="flex flex-col gap-0.5 text-slate-400">Link to…
         <select data-link-partner="1" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[11px] text-slate-200">
@@ -474,8 +467,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
       return;
     }
     panel.classList.remove('hidden');
-    const isFix = selected.kind === 'fixation';
-    if (title) title.textContent = isFix ? FIX_LABELS[item.type] : FORCE_LABELS[item.type];
+    if (title) title.textContent = componentDef(item.type)?.label ?? item.type;
 
     // Keep focus/scroll stable while re-rendering after an edit.
     const activeKey = document.activeElement?.dataset?.key;
@@ -484,22 +476,20 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     html += field('X', 'x', item.x);
     html += field('Y', 'y', item.y);
     html += field('Z', 'z', item.z);
-    if (isFix) {
-      if (item.type === 'bolt_hole') {
-        html += holeInspector(item);
-      } else if (item.type === 'wall_pad') {
-        html += selectField('Face', 'face', item.face, [
-          ['x-', 'X−'], ['x+', 'X+'], ['y-', 'Y−'], ['y+', 'Y+'], ['z-', 'Z−'], ['z+', 'Z+'],
-        ]);
-        html += field('Width', 'width', item.width, 0.05, 0.05, 1);
-        html += field('Height', 'height', item.height, 0.05, 0.05, 1);
-        html += field('Depth (cells)', 'depth', item.depth, 1, 1, 8);
-      } else if (item.type === 'rest_point') {
-        html += field('Radius', 'radius', item.radius, 0.01, 0.02, 0.5);
-        html += checkField('Fix X', 'fixX', item.fixX !== false);
-        html += checkField('Fix Y', 'fixY', item.fixY !== false);
-        html += checkField('Fix Z', 'fixZ', item.fixZ !== false);
-      }
+    if (item.type === 'bolt_hole') {
+      html += holeInspector(item);
+    } else if (item.type === 'wall_pad') {
+      html += selectField('Face', 'face', item.face, [
+        ['x-', 'X−'], ['x+', 'X+'], ['y-', 'Y−'], ['y+', 'Y+'], ['z-', 'Z−'], ['z+', 'Z+'],
+      ]);
+      html += field('Width', 'width', item.width, 0.05, 0.05, 1);
+      html += field('Height', 'height', item.height, 0.05, 0.05, 1);
+      html += field('Depth (cells)', 'depth', item.depth, 1, 1, 8);
+    } else if (item.type === 'rest_point') {
+      html += field('Radius', 'radius', item.radius, 0.01, 0.02, 0.5);
+      html += checkField('Fix X', 'fixX', item.fixX !== false);
+      html += checkField('Fix Y', 'fixY', item.fixY !== false);
+      html += checkField('Fix Z', 'fixZ', item.fixZ !== false);
     } else if (item.type === 'pressure') {
       html += pressureInspector(item);
     } else {
@@ -513,8 +503,8 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     }
   }
 
-  function selectItem(kind, id, { fromGizmo = false } = {}) {
-    selected = kind && id ? { kind, id } : null;
+  function selectItem(id, { fromGizmo = false } = {}) {
+    selected = id ? { id } : null;
     if (!fromGizmo) onSelect?.(selected);
     renderObjectList();
     renderInspector();
@@ -525,8 +515,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     pushUndo();
     const scene = ensureScene();
     const id = selected.id;
-    scene.fixations = scene.fixations.filter((f) => f.id !== id);
-    scene.forces = scene.forces.filter((f) => f.id !== id);
+    scene.components = scene.components.filter((f) => f.id !== id);
     pruneLinks(scene, id);
     selected = null;
     onSelect?.(null);
@@ -534,8 +523,8 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
   }
 
   /* ------------------------------ Add tools ------------------------------ */
-  function select(kind, id) {
-    selected = { kind, id };
+  function select(id) {
+    selected = { id };
     onSelect?.(selected);
     notify(false);
   }
@@ -544,25 +533,25 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     pushUndo();
     const scene = ensureScene();
     const base = type === 'bolt_hole' ? { y: 0.5, z: 0.5, x: 0.5, radius: 0.045 } : {};
-    const f = createFixation({ type, ...base, ...partial });
-    scene.fixations.push(f);
-    select('fixation', f.id);
+    const f = createComponent(type, { ...base, ...partial });
+    scene.components.push(f);
+    select(f.id);
   }
 
   function addLoadedHole() {
     pushUndo();
     const scene = ensureScene();
     const f = createLoadedHole({ x: 0.7, y: 0.5, z: 0.5, radius: 0.045, loadMode: 'directional', fy: -1 });
-    scene.fixations.push(f);
-    select('fixation', f.id);
+    scene.components.push(f);
+    select(f.id);
   }
 
   function addForce(type, partial = {}) {
     pushUndo();
     const scene = ensureScene();
-    const f = createForce({ type, ...partial });
-    scene.forces.push(f);
-    select('force', f.id);
+    const f = createComponent(type, partial);
+    scene.components.push(f);
+    select(f.id);
   }
 
   /** Point load with `n` force axes (n > 1 starts inside the volume so every side can push). */
@@ -600,7 +589,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     pushUndo();
     const scene = ensureScene();
     const r = 0.05;
-    const left = createFixation({ type: 'bolt_hole', x: 0.2, y: 0.5, z: 0.5, axis: 'z', radius: r });
+    const left = createComponent('bolt_hole', { x: 0.2, y: 0.5, z: 0.5, axis: 'z', radius: r });
     const right = createLoadedHole({
       x: 0.8,
       y: 0.5,
@@ -613,22 +602,22 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
       fz: 0,
       magnitude: 1,
     });
-    scene.fixations.push(left, right);
+    scene.components.push(left, right);
     linkFeatures(scene, left.id, right.id, dims());
-    select('fixation', right.id);
+    select(right.id);
   }
 
   /* ------------------------------ Object list events ------------------------------ */
   on($('list-scene-objects'), 'click', (e) => {
     const li = e.target.closest('[data-id]');
-    if (li) selectItem(/** @type {'fixation'|'force'} */ (li.dataset.kind), li.dataset.id);
+    if (li) selectItem(li.dataset.id);
   });
   on($('list-scene-objects'), 'keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const li = e.target.closest?.('[data-id]');
     if (!li) return;
     e.preventDefault();
-    selectItem(/** @type {'fixation'|'force'} */ (li.dataset.kind), li.dataset.id);
+    selectItem(li.dataset.id);
   });
 
   on($('btn-add-rest'), 'click', () => addFixation('rest_point'));

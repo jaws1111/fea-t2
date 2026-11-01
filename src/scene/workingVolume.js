@@ -20,6 +20,7 @@ import { componentDef, orderedFeatures } from './components/index.js';
 
 /**
  * @typedef {Object} WorkingVolume
+ * @property {'box'} shape
  * @property {WorkingVolumeMode} mode
  * @property {number} padding   auto-mode margin as fraction of domain
  * @property {WorkingBounds} bounds
@@ -30,7 +31,7 @@ const DEFAULT_DIMS = Object.freeze({ nx: 32, ny: 32, nz: 32 });
 
 /** @returns {WorkingVolume} */
 export function createDefaultWorkingVolume() {
-  return { mode: 'auto', padding: 0.06, bounds: { ...FULL } };
+  return { shape: 'box', mode: 'auto', padding: 0.06, bounds: { ...FULL } };
 }
 
 /** Thinnest manual working volume per axis (normalized): about one cell on a 100-cell axis. */
@@ -240,6 +241,7 @@ export function sanitizeFreeBounds(b) {
 export function ensureWorkingVolume(scene, dims = DEFAULT_DIMS) {
   if (!scene.workingVolume) scene.workingVolume = createDefaultWorkingVolume();
   const wv = scene.workingVolume;
+  if (!wv.shape) wv.shape = 'box';
   if (wv.mode !== 'full' && wv.mode !== 'auto' && wv.mode !== 'manual') wv.mode = 'auto';
   if (!Number.isFinite(wv.padding)) wv.padding = 0.06;
   if (wv.mode === 'auto') wv.bounds = computeAutoWorkingBounds(scene, wv.padding, dims);

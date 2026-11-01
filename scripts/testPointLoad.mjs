@@ -1,6 +1,6 @@
 import { applyCustomBCs, analyzeScene } from '../src/scene/applyCustomBCs.js';
 import { getCustomFixtureDescriptors } from '../src/scene/fixturesFromScene.js';
-import { createEmptyScene, createFixation, createForce, normalizeScene } from '../src/scene/types.js';
+import { createEmptyScene, createComponent, normalizeScene } from '../src/scene/types.js';
 import { computeAutoWorkingBounds } from '../src/scene/workingVolume.js';
 import { defaultPointDirs, pointLoadDirs, sceneLoadCaseCount } from '../src/scene/pointLoad.js';
 import { createSolverState } from '../src/topo/solverState.js';
@@ -18,7 +18,7 @@ const nodes = (nx + 1) * (ny + 1) * (nz + 1);
 
 function load(partial, loadCase = 0) {
   const scene = createEmptyScene();
-  scene.forces.push(createForce({ type: 'point_load', x: 0.5, y: 0.5, z: 0.5, ...partial }));
+  scene.components.push(createComponent('point_load', { x: 0.5, y: 0.5, z: 0.5, ...partial }));
   normalizeScene(scene);
   const fixed = new Uint8Array(3 * nodes);
   const F = new Float32Array(3 * nodes);
@@ -47,7 +47,7 @@ console.log('2. Separate load cases (default)');
 for (const n of [2, 3, 4, 5, 6]) {
   const probe = load({ axes: n, magnitude: 1.5 });
   check(sceneLoadCaseCount(probe.scene) === n, `${n} axes -> ${n} load cases`);
-  const dirs = pointLoadDirs(probe.scene.forces[0]);
+  const dirs = pointLoadDirs(probe.scene.components[0]);
   let ok = new Set(dirs).size === n;
   for (let k = 0; k < n; k++) {
     const r = load({ axes: n, magnitude: 1.5 }, k);
@@ -80,7 +80,7 @@ console.log('4. Directions');
   check(defaultPointDirs({ fy: -1 }, 2).join() === 'y-,y+', '2 axes = pair along the force axis');
   check(defaultPointDirs({ fy: -1 }, 6).length === 6, '6 axes = all');
   const bad = load({ axes: 4, dirs: ['q+', 'x+'] });
-  check(pointLoadDirs(bad.scene.forces[0]).length === 4, 'invalid direction list is repaired to 4 axes');
+  check(pointLoadDirs(bad.scene.components[0]).length === 4, 'invalid direction list is repaired to 4 axes');
 }
 
 console.log('5. Glyphs, working volume, analysis');
@@ -99,8 +99,8 @@ console.log('5. Glyphs, working volume, analysis');
   const one = computeAutoWorkingBounds(single.scene, 0, { nx, ny, nz });
   check(wide.x1 - wide.x0 > one.x1 - one.x0, 'auto working volume covers a burst');
   const scene = createEmptyScene();
-  scene.fixations.push(createFixation({ type: 'rest_point', x: 0.1, y: 0, z: 0.5 }));
-  scene.forces.push(createForce({ type: 'point_load', axes: 2, dirs: ['y+', 'y-'], x: 0.5, y: 0.5, z: 0.5 }));
+  scene.components.push(createComponent('rest_point', { x: 0.1, y: 0, z: 0.5 }));
+  scene.components.push(createComponent('point_load', { axes: 2, dirs: ['y+', 'y-'], x: 0.5, y: 0.5, z: 0.5 }));
   const an = analyzeScene(normalizeScene(scene), { nx, ny, nz });
   check(an.loadedNodes >= 1 && an.fixedNodes > 0, 'analysis handles load cases');
 }
@@ -111,12 +111,12 @@ console.log('6. Optimization: up/down load with two rests connects to both suppo
   const build = (mode) => {
     const scene = createEmptyScene();
     scene.workingVolume = { mode: 'full', padding: 0, bounds: { x0: 0, x1: 1, y0: 0, y1: 1, z0: 0, z1: 1 } };
-    scene.fixations.push(
-      createFixation({ type: 'rest_point', x: 0.08, y: 0, z: 0.5, radius: 0.06 }),
-      createFixation({ type: 'rest_point', x: 0.92, y: 0, z: 0.5, radius: 0.06 }),
+    scene.components.push(
+      createComponent('rest_point', { x: 0.08, y: 0, z: 0.5, radius: 0.06 }),
+      createComponent('rest_point', { x: 0.92, y: 0, z: 0.5, radius: 0.06 }),
     );
-    scene.forces.push(
-      createForce({ type: 'point_load', x: 0.5, y: 0.7, z: 0.5, axes: 2, dirs: ['y-', 'y+'], axesMode: mode, magnitude: 1, radius: 0.1 }),
+    scene.components.push(
+      createComponent('point_load', { x: 0.5, y: 0.7, z: 0.5, axes: 2, dirs: ['y-', 'y+'], axesMode: mode, magnitude: 1, radius: 0.1 }),
     );
     normalizeScene(scene);
     const state = createSolverState({ nx: gx, ny: gy, nz: gz, volfrac: 0.2, penal: 3, rmin: 1.5, preset: 'custom', scene });

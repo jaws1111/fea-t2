@@ -41,12 +41,11 @@ export function pointLoadCaseCount(f) {
 /**
  * Number of independent load cases a scene defines (1 = a single solve per iteration).
  * Multi-axis point loads in 'cases' mode contribute one case per axis.
- * @param {{ forces?: any[], components?: any[] } | null | undefined} scene
+ * @param {{ components?: any[] } | null | undefined} scene
  */
 export function sceneLoadCaseCount(scene) {
   let k = 1;
-  const list = scene?.components ?? scene?.forces ?? [];
-  for (const f of list) k = Math.max(k, pointLoadCaseCount(f));
+  for (const f of scene?.components ?? []) k = Math.max(k, pointLoadCaseCount(f));
   return k;
 }
 

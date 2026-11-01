@@ -89,6 +89,7 @@ export function cropSceneToWorkingVolume(scene, dims) {
   }
   out.workingVolume = {
     ...(out.workingVolume ?? {}),
+    shape: out.workingVolume?.shape ?? 'box',
     mode: 'full',
     bounds: { x0: 0, x1: 1, y0: 0, y1: 1, z0: 0, z1: 1 },
   };

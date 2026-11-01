@@ -39,12 +39,9 @@ export function ensureLinks(scene) {
  * @param {import('./types.js').Scene} scene
  * @param {string} id
  */
-export function findFeatureById(scene, id) {
-  const fix = scene.fixations?.find((f) => f.id === id);
-  if (fix) return { kind: /** @type {'fixation'} */ ('fixation'), feature: fix };
-  const force = scene.forces?.find((f) => f.id === id);
-  if (force) return { kind: /** @type {'force'} */ ('force'), feature: force };
-  return null;
+/** @param {import('./types.js').Scene} scene @param {string} id */
+export function findComponent(scene, id) {
+  return scene.components?.find((c) => c.id === id) ?? null;
 }
 
 /**
@@ -57,8 +54,8 @@ export function findFeatureById(scene, id) {
  */
 export function linkFeatures(scene, aId, bId, dims) {
   if (aId === bId) return null;
-  const a = findFeatureById(scene, aId)?.feature;
-  const b = findFeatureById(scene, bId)?.feature;
+  const a = findComponent(scene, aId);
+  const b = findComponent(scene, bId);
   if (!a || !b) return null;
   const links = ensureLinks(scene);
   const existing = links.find(
@@ -117,7 +114,7 @@ export function linkedGroup(scene, id) {
  */
 export function applyLinksAfterMove(scene, movedId) {
   const links = ensureLinks(scene);
-  const start = findFeatureById(scene, movedId)?.feature;
+  const start = findComponent(scene, movedId);
   if (!start) return [movedId];
 
   /** @type {Map<string, { x: number, y: number, z: number }>} */
@@ -132,7 +129,7 @@ export function applyLinksAfterMove(scene, movedId) {
       const curIsA = l.aId === cur;
       const otherId = curIsA ? l.bId : l.aId;
       if (pos.has(otherId)) continue;
-      if (!findFeatureById(scene, otherId)) continue;
+      if (!findComponent(scene, otherId)) continue;
       const s = curIsA ? 1 : -1;
       pos.set(otherId, { x: p.x + s * l.dx, y: p.y + s * l.dy, z: p.z + s * l.dz });
       queue.push(otherId);
@@ -161,7 +158,7 @@ export function applyLinksAfterMove(scene, movedId) {
   const sz = fit(minZ, maxZ);
 
   for (const [id, p] of pos) {
-    const f = findFeatureById(scene, id)?.feature;
+    const f = findComponent(scene, id);
     if (!f) continue;
     f.x = Math.max(0, Math.min(1, p.x + sx));
     f.y = Math.max(0, Math.min(1, p.y + sy));
@@ -203,6 +200,6 @@ export function pruneLinks(scene, deletedId) {
   const links = ensureLinks(scene);
   scene.links = links.filter((l) => {
     if (deletedId && (l.aId === deletedId || l.bId === deletedId)) return false;
-    return !!(findFeatureById(scene, l.aId) && findFeatureById(scene, l.bId));
+    return !!(findComponent(scene, l.aId) && findComponent(scene, l.bId));
   });
 }

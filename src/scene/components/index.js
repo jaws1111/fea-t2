@@ -27,11 +27,7 @@ export function componentDef(type) {
   return COMPONENTS[type] ?? null;
 }
 
-/**
- * Fixations first, then forces. Scene v3 stores that same order in `components`.
- * @param {{ fixations?: any[], forces?: any[], components?: any[] } | null | undefined} scene
- */
+/** @param {{ components?: any[] } | null | undefined} scene */
 export function orderedFeatures(scene) {
-  if (Array.isArray(scene?.components)) return scene.components;
-  return [...(scene?.fixations ?? []), ...(scene?.forces ?? [])];
+  return scene?.components ?? [];
 }

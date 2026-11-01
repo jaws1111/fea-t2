@@ -107,7 +107,7 @@ export function createVolumeGizmo({ scene, camera, domElement, controls, getConf
       z: [Infinity, -Infinity],
     };
     if (!sc) return r;
-    for (const f of [...(sc.fixations ?? []), ...(sc.forces ?? [])]) {
+    for (const f of sc.components ?? []) {
       if (!f) continue;
       const faceAxis = f.type === 'wall_pad' ? String(f.face ?? 'x-')[0] : null;
       for (const k of KEYS) {

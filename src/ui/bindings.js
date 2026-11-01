@@ -255,9 +255,8 @@ export function bindAll({
         if (changed) onRebuild(config);
       }
       if (p.key === 'custom') {
-        if (!config.scene || (!config.scene.fixations?.length && !config.scene.forces?.length)) {
-          config.scene = createTwoBoltBracketScene();
-        }
+        config.scene = config.scene ? normalizeScene(config.scene) : null;
+        if (isSceneEmpty(config.scene)) config.scene = createTwoBoltBracketScene();
         sceneEditor.showTab('scene');
       }
       renderPresetButtons();

@@ -5,7 +5,7 @@
 //  3. The smooth-body Deform offset actually moves the mesh.
 // Run: node scripts/testWorkingVolume.mjs
 import { SCENE_EXAMPLES } from '../src/scene/templates.js';
-import { createFixation, createForce, createLoadedHole, createEmptyScene, normalizeScene } from '../src/scene/types.js';
+import { createComponent, createLoadedHole, createEmptyScene, normalizeScene } from '../src/scene/types.js';
 import { resolveWorkingBounds, resolveFitBounds, pressureOverflowCells } from '../src/scene/workingVolume.js';
 import { buildPassiveMask } from '../src/scene/passiveVoids.js';
 import { applyCustomBCs } from '../src/scene/applyCustomBCs.js';
@@ -70,11 +70,11 @@ for (let k = 0; k < 120; k++) {
   for (let i = 0; i < n; i++) {
     const t = Math.floor(rnd() * 5);
     const p = { x: edgeBias(), y: edgeBias(), z: edgeBias() };
-    if (t === 0) s.fixations.push(createFixation({ type: 'rest_point', ...p, radius: 0.01 + rnd() * 0.08 }));
-    else if (t === 1) s.fixations.push(createFixation({ type: 'bolt_hole', ...p, axis: 'xyz'[Math.floor(rnd() * 3)], len: 0.05 + rnd() * 0.6, radius: 0.02 + rnd() * 0.06 }));
-    else if (t === 2) s.fixations.push(createFixation({ type: 'wall_pad', face: ['x-', 'x+', 'y-', 'y+', 'z-', 'z+'][Math.floor(rnd() * 6)], ...p, width: 0.1 + rnd() * 0.8, height: 0.1 + rnd() * 0.8, depth: 2 }));
-    else if (t === 3) s.forces.push(createForce({ type: 'point_load', ...p }));
-    else s.forces.push(createForce({ type: 'pressure', ...p, shape: rnd() < 0.5 ? 'box' : 'sphere', radius: 0.05 + rnd() * 0.1, hx: 0.05 + rnd() * 0.1, hy: 0.05 + rnd() * 0.1, hz: 0.05 + rnd() * 0.1 }));
+    if (t === 0) s.components.push(createComponent('rest_point', { ...p, radius: 0.01 + rnd() * 0.08 }));
+    else if (t === 1) s.components.push(createComponent('bolt_hole', { ...p, axis: 'xyz'[Math.floor(rnd() * 3)], len: 0.05 + rnd() * 0.6, radius: 0.02 + rnd() * 0.06 }));
+    else if (t === 2) s.components.push(createComponent('wall_pad', { face: ['x-', 'x+', 'y-', 'y+', 'z-', 'z+'][Math.floor(rnd() * 6)], ...p, width: 0.1 + rnd() * 0.8, height: 0.1 + rnd() * 0.8, depth: 2 }));
+    else if (t === 3) s.components.push(createComponent('point_load', { ...p }));
+    else s.components.push(createComponent('pressure', { ...p, shape: rnd() < 0.5 ? 'box' : 'sphere', radius: 0.05 + rnd() * 0.1, hx: 0.05 + rnd() * 0.1, hy: 0.05 + rnd() * 0.1, hz: 0.05 + rnd() * 0.1 }));
   }
   checkEncapsulated(`random#${k}`, s, grids[k % grids.length], k % 3 === 0 ? 0 : 0.06);
 }
@@ -94,8 +94,8 @@ for (const ex of SCENE_EXAMPLES) {
   if (fit.cropped) {
     // physical size of a hole radius is preserved (cells scale k)
     const k = nx / size.x;
-    const f0 = scene.fixations.find((f) => f.type === 'bolt_hole' || f.type === 'rest_point');
-    const f1 = fit.scene.fixations.find((f) => f.id === f0?.id);
+    const f0 = scene.components.find((f) => f.type === 'bolt_hole' || f.type === 'rest_point');
+    const f1 = fit.scene.components.find((f) => f.id === f0?.id);
     if (f0 && f1) {
       const r0 = f0.radius * Math.max(dims.nx, dims.ny, dims.nz) * k;
       const r1 = f1.radius * Math.max(nx, ny, nz);
@@ -121,10 +121,10 @@ for (const mode of ['full', 'auto']) {
   for (const dims of [{ nx: 64, ny: 24, nz: 16 }, { nx: 36, ny: 15, nz: 8 }, { nx: 20, ny: 8, nz: 4 }]) {
     const s = normalizeScene(SCENE_EXAMPLES.find((e) => e.id === 'gas_cylinder').build());
     s.workingVolume = { mode, padding: 0.06, bounds: { x0: 0, x1: 1, y0: 0, y1: 1, z0: 0, z1: 1 } };
-    const p0 = s.forces.find((f) => f.type === 'pressure');
+    const p0 = s.components.find((f) => f.type === 'pressure');
     const over = pressureOverflowCells(s, dims);
     const fit = fitGridForScene(s, dims, 30000);
-    const p1 = fit.scene.forces.find((f) => f.type === 'pressure');
+    const p1 = fit.scene.components.find((f) => f.type === 'pressure');
     const label = `${mode} gas cylinder @${dims.nx}x${dims.ny}x${dims.nz}`;
     check(!pressureOverflowCells(fit.scene, fit.dims), `${label}: still overflows after fit`);
     if (over) {
@@ -143,7 +143,7 @@ console.log('2c. Dragged working-volume box → cubic voxels');
 {
   const dims = { nx: 48, ny: 24, nz: 16 };
   const scene = normalizeScene(SCENE_EXAMPLES.find((e) => e.id === 'bolt_bracket').build());
-  const pos0 = scene.fixations.map((f) => [f.x * dims.nx, f.y * dims.ny, f.z * dims.nz]);
+  const pos0 = scene.components.map((f) => [f.x * dims.nx, f.y * dims.ny, f.z * dims.nz]);
   const boxes = [
     { x0: 0.1, x1: 0.9, y0: 0, y1: 1, z0: 0, z1: 1 },
     { x0: -0.3, x1: 1.5, y0: -0.5, y1: 1.2, z0: 0, z1: 1 }, // grows past the domain
@@ -155,7 +155,7 @@ console.log('2c. Dragged working-volume box → cubic voxels');
     check(Math.abs(fit.dims.ny / (sy * k) - 1) < 0.1 && Math.abs(fit.dims.nz / (sz * k) - 1) < 0.1, `box ${JSON.stringify(bx)}: voxels not cubic (${fit.dims.nx}x${fit.dims.ny}x${fit.dims.nz})`);
     const tot = fit.dims.nx * fit.dims.ny * fit.dims.nz;
     check(Math.abs(tot - 20000) / 20000 < 0.12, `box: cell budget 20000 → ${tot}`);
-    fit.scene.fixations.forEach((f, i) => {
+    fit.scene.components.forEach((f, i) => {
       if (f.type === 'wall_pad') return; // sticks to its (new) face
       const wx = f.x * fit.dims.nx / k + bx.x0 * dims.nx;
       const wy = f.y * fit.dims.ny / k + bx.y0 * dims.ny;

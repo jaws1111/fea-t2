@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { nodeToWorld } from './coordinates.js';
-import { applyLinksAfterMove, ensureLinks, findFeatureById } from '../scene/links.js';
+import { componentDef } from '../scene/components/index.js';
+import { applyLinksAfterMove, ensureLinks, findComponent } from '../scene/links.js';
 
 /** Colours match boundaryFixtures.js glyphs. */
 const COLORS = {
@@ -56,7 +57,7 @@ function wallFace(f) {
  *   controls?: { enabled: boolean } | null,
  *   getConfig: () => { nx: number, ny: number, nz: number, scene?: import('../scene/types.js').Scene | null },
  *   onSceneChanged?: () => void,
- *   onSelect?: (sel: { kind: 'fixation'|'force', id: string } | null) => void,
+ *   onSelect?: (sel: { id: string } | null) => void,
  * }} opts
  */
 export function createSceneGizmoController({ scene, camera, domElement, controls, getConfig, onSceneChanged, onSelect, onDragMove }) {
@@ -119,18 +120,17 @@ export function createSceneGizmoController({ scene, camera, domElement, controls
   let downHitProxy = false;
 
   /* ---------------- lookup ---------------- */
-  function findFeature(id, kind) {
+  function findFeature(id) {
     const sc = getConfig().scene;
-    if (!sc) return null;
-    const list = kind === 'fixation' ? sc.fixations : sc.forces;
-    return list?.find((f) => f.id === id) ?? null;
+    if (!sc || !id) return null;
+    return sc.components?.find((f) => f.id === id) ?? null;
   }
 
   /** Constrain a wall pad proxy to its face plane and hide the gizmo handle for that axis. */
   function applyAxisVisibility(proxy) {
     tc.showX = tc.showY = tc.showZ = true;
     if (!proxy) return;
-    const f = findFeature(proxy.userData.featureId, proxy.userData.kind);
+    const f = findFeature(proxy.userData.featureId);
     if (f?.type === 'wall_pad') {
       const { axis } = wallFace(f);
       if (axis === 'x') tc.showX = false;
@@ -147,15 +147,14 @@ export function createSceneGizmoController({ scene, camera, domElement, controls
     clearLinkLines();
   }
 
-  function makeProxy(feature, kind) {
-    const isFix = kind === 'fixation';
-    const hex = isFix ? (COLORS[feature.type] ?? COLORS.rest_point) : COLORS.force;
+  function makeProxy(feature) {
+    const roles = componentDef(feature.type)?.roles(feature) ?? { support: false, load: true };
+    const hex = roles.support ? (COLORS[feature.type] ?? COLORS.rest_point) : COLORS.force;
     const useCube = feature.type === 'wall_pad' || feature.type === 'pressure' || feature.type === 'point_load';
     const mesh = new THREE.Mesh(useCube ? geoms.cube : geoms.sphere, materialFor(hex));
     mesh.name = `gizmo-${feature.id}`;
     mesh.renderOrder = 1000;
     mesh.userData.featureId = feature.id;
-    mesh.userData.kind = kind;
     // Keep a roughly constant on-screen size regardless of zoom.
     mesh.onBeforeRender = (_r, _s, cam) => {
       mesh.getWorldPosition(camPos);
@@ -195,8 +194,8 @@ export function createSceneGizmoController({ scene, camera, domElement, controls
     if (!sc) return;
     for (const link of ensureLinks(sc)) {
       if (link.type !== 'rigid') continue;
-      const a = findFeatureById(sc, link.aId)?.feature;
-      const b = findFeatureById(sc, link.bId)?.feature;
+      const a = findComponent(sc, link.aId);
+      const b = findComponent(sc, link.bId);
       if (!a || !b) continue;
       const wa = normToWorld(cfg, a.x, a.y, a.z);
       const wb = normToWorld(cfg, b.x, b.y, b.z);
@@ -218,14 +217,8 @@ export function createSceneGizmoController({ scene, camera, domElement, controls
     clearProxies();
     const sc = cfg.scene;
     if (sc) {
-      for (const f of sc.fixations ?? []) {
-        const m = makeProxy(f, 'fixation');
-        placeProxy(m, f, cfg);
-        group.add(m);
-        proxies.set(f.id, m);
-      }
-      for (const f of sc.forces ?? []) {
-        const m = makeProxy(f, 'force');
+      for (const f of sc.components ?? []) {
+        const m = makeProxy(f);
         placeProxy(m, f, cfg);
         group.add(m);
         proxies.set(f.id, m);
@@ -253,10 +246,7 @@ export function createSceneGizmoController({ scene, camera, domElement, controls
     tc.attach(proxy);
     helper.visible = true;
     if (!silent) {
-      onSelect?.({
-        kind: /** @type {'fixation'|'force'} */ (proxy.userData.kind),
-        id,
-      });
+      onSelect?.({ id });
     }
   }
 
@@ -314,9 +304,9 @@ export function createSceneGizmoController({ scene, camera, domElement, controls
     for (const id of ids) {
       const mesh = proxies.get(id);
       if (!mesh) continue;
-      const hit = findFeatureById(sc, id);
+      const hit = findComponent(sc, id);
       if (!hit) continue;
-      placeProxy(mesh, hit.feature, cfg);
+      placeProxy(mesh, hit, cfg);
     }
     syncLinkLines(cfg);
   }
@@ -325,7 +315,7 @@ export function createSceneGizmoController({ scene, camera, domElement, controls
     const proxy = tc.object;
     if (!proxy) return;
     const cfg = getConfig();
-    const f = findFeature(proxy.userData.featureId, proxy.userData.kind);
+    const f = findFeature(proxy.userData.featureId);
     if (!f) return;
     const n = worldToNorm(cfg, proxy.position.x, proxy.position.y, proxy.position.z);
     if (f.type === 'wall_pad') {
@@ -358,7 +348,7 @@ export function createSceneGizmoController({ scene, camera, domElement, controls
     if (proxy) {
       // Snap to the grid node the solver will actually use.
       const cfg = getConfig();
-      const f = findFeature(proxy.userData.featureId, proxy.userData.kind);
+      const f = findFeature(proxy.userData.featureId);
       if (f && cfg.scene) {
         const ix = clampInt(Math.round(f.x * cfg.nx), 0, cfg.nx);
         const iy = clampInt(Math.round(f.y * cfg.ny), 0, cfg.ny);
