@@ -46,7 +46,7 @@ check(
   classics.join(',') === 'builtin:bridge,builtin:deck,builtin:cantilever,builtin:mbb,builtin:michell',
   `classic order ${classics.join(',')}`,
 );
-check(examples.length === 7, `example recipes ${examples.length}`);
+check(examples.length === 14, `example recipes ${examples.length}`);
 check(listed.filter((r) => r.source === 'user').length === 0, 'no user recipes yet');
 
 const bridge = getRecipe('builtin:bridge');

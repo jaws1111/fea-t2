@@ -247,6 +247,253 @@ export function createTorqueArmScene() {
   return scene;
 }
 
+const CUBE = '24x24x24';
+
+/**
+ * Clamped cylindrical sleeve and a free pin that hangs from the far end.
+ * The sleeve bore stays open. The pin load is clear of the fixed shell.
+ */
+export function createSleeveLinkScene() {
+  const scene = createEmptyScene();
+  scene.components.push(
+    createComponent('wall_cylinder', {
+      x: 0.28,
+      y: 0.5,
+      z: 0.5,
+      axis: 'z',
+      len: 0.45,
+      radius: 0.1,
+      wall: 2,
+      active: 'inner',
+      solid: true,
+    }),
+    createLoadedHole({
+      x: 0.78,
+      y: 0.5,
+      z: 0.5,
+      axis: 'z',
+      len: 0.4,
+      radius: 0.045,
+      loadMode: 'directional',
+      fx: 0,
+      fy: -1,
+      fz: 0,
+      magnitude: 1,
+    }),
+  );
+  return scene;
+}
+
+/**
+ * Hexagonal mast fixed on its inner faces, with a downward load above the prism.
+ */
+export function createHexMastScene() {
+  const scene = createEmptyScene();
+  scene.components.push(
+    createComponent('wall_prism', {
+      x: 0.5,
+      y: 0.38,
+      z: 0.5,
+      axis: 'y',
+      len: 0.5,
+      radius: 0.16,
+      n: 6,
+      wall: 2,
+      active: 'inner',
+      solid: true,
+    }),
+    createComponent('point_load', {
+      x: 0.5,
+      y: 0.92,
+      z: 0.5,
+      fx: 0,
+      fy: -1,
+      fz: 0,
+      magnitude: 1,
+    }),
+  );
+  return scene;
+}
+
+/**
+ * Spherical housing fixed on the inner surface, pulled sideways by a lug load.
+ */
+export function createBallSocketScene() {
+  const scene = createEmptyScene();
+  scene.components.push(
+    createComponent('surround', {
+      x: 0.36,
+      y: 0.5,
+      z: 0.5,
+      shape: 'sphere',
+      radius: 0.14,
+      wall: 2,
+      active: 'inner',
+      solid: true,
+    }),
+    createComponent('point_load', {
+      x: 0.84,
+      y: 0.5,
+      z: 0.5,
+      fx: 1,
+      fy: 0,
+      fz: 0,
+      magnitude: 1,
+    }),
+  );
+  return scene;
+}
+
+/**
+ * A ring foot carries a load on the axis, above the ring.
+ */
+export function createRingPedestalScene() {
+  const scene = createEmptyScene();
+  scene.components.push(
+    createComponent('rest_ring', {
+      x: 0.5,
+      y: 0.14,
+      z: 0.5,
+      axis: 'y',
+      radius: 0.22,
+      solid: true,
+    }),
+    createComponent('point_load', {
+      x: 0.5,
+      y: 0.8,
+      z: 0.5,
+      fx: 0,
+      fy: -1,
+      fz: 0,
+      magnitude: 1,
+    }),
+  );
+  return scene;
+}
+
+/**
+ * Two rest pads under a deck, with a downward patch load between them.
+ */
+export function createPadTableScene() {
+  const scene = createEmptyScene();
+  scene.components.push(
+    createComponent('rest_pad', {
+      x: 0.18,
+      y: 0.08,
+      z: 0.5,
+      axis: 'y',
+      width: 0.22,
+      height: 0.55,
+      depth: 2,
+    }),
+    createComponent('rest_pad', {
+      x: 0.82,
+      y: 0.08,
+      z: 0.5,
+      axis: 'y',
+      width: 0.22,
+      height: 0.55,
+      depth: 2,
+    }),
+    createComponent('face_load', {
+      x: 0.5,
+      y: 1,
+      z: 0.5,
+      face: 'y+',
+      width: 0.4,
+      height: 0.5,
+      fx: 0,
+      fy: -1,
+      fz: 0,
+      magnitude: 1,
+    }),
+  );
+  return scene;
+}
+
+/**
+ * A wall carries the part. A solid block stays in the design as a kept insert.
+ * The tip load sits clear of the wall.
+ */
+export function createInsertBlockScene() {
+  const scene = createEmptyScene();
+  scene.components.push(
+    createComponent('wall_pad', {
+      face: 'x-',
+      x: 0,
+      y: 0.5,
+      z: 0.5,
+      width: 1,
+      height: 1,
+      depth: 2,
+    }),
+    createComponent('block', {
+      x: 0.4,
+      y: 0.5,
+      z: 0.5,
+      hx: 0.08,
+      hy: 0.16,
+      hz: 0.22,
+      void: false,
+    }),
+    createComponent('point_load', {
+      x: 0.9,
+      y: 0.55,
+      z: 0.5,
+      fx: 0,
+      fy: -1,
+      fz: 0,
+      magnitude: 1,
+    }),
+  );
+  return scene;
+}
+
+/**
+ * Clamped wall at one end, a floor roller (vertical DOF only) at the other,
+ * and a line load on the top.
+ */
+export function createRollerBeamScene() {
+  const scene = createEmptyScene();
+  scene.components.push(
+    createComponent('wall_pad', {
+      face: 'x-',
+      x: 0,
+      y: 0.5,
+      z: 0.5,
+      width: 1,
+      height: 1,
+      depth: 2,
+    }),
+    createComponent('wall_pad', {
+      id: 'roller',
+      face: 'y-',
+      x: 0.82,
+      y: 0,
+      z: 0.5,
+      width: 0.28,
+      height: 0.7,
+      depth: 1,
+      fixX: false,
+      fixY: true,
+      fixZ: false,
+      solid: false,
+    }),
+    createComponent('line_load', {
+      x: 0.55,
+      y: 1,
+      z: 0.5,
+      axis: 'z',
+      len: 0.55,
+      fx: 0,
+      fy: -1,
+      fz: 0,
+      magnitude: 1,
+    }),
+  );
+  return scene;
+}
+
 /**
  * Ready-made scenes shown in the Custom Scene tab.
  * `volfrac` = recommended volume fraction, `resolution` = grid the example was tuned for.
@@ -315,5 +562,68 @@ export const SCENE_EXAMPLES = [
     volfrac: 0.25,
     resolution: '48x24x16',
     build: createPressureBridgeScene,
+  },
+  {
+    id: 'sleeve_link',
+    title: 'Sleeve link',
+    blurb: 'Clamped cylinder bore and a hanging pin clear of the shell.',
+    icon: 'ph-cylinder',
+    volfrac: 0.28,
+    resolution: CUBE,
+    build: createSleeveLinkScene,
+  },
+  {
+    id: 'hex_mast',
+    title: 'Hex mast',
+    blurb: 'Hexagonal tube fixed on the inner faces, load above the prism.',
+    icon: 'ph-hexagon',
+    volfrac: 0.25,
+    resolution: CUBE,
+    build: createHexMastScene,
+  },
+  {
+    id: 'ball_socket',
+    title: 'Ball socket',
+    blurb: 'Spherical housing fixed inside, pulled sideways by a lug.',
+    icon: 'ph-sphere',
+    volfrac: 0.22,
+    resolution: CUBE,
+    build: createBallSocketScene,
+  },
+  {
+    id: 'ring_pedestal',
+    title: 'Ring pedestal',
+    blurb: 'Ring foot on the base, downward load on the axis above it.',
+    icon: 'ph-circle',
+    volfrac: 0.25,
+    resolution: CUBE,
+    build: createRingPedestalScene,
+  },
+  {
+    id: 'pad_table',
+    title: 'Pad table',
+    blurb: 'Two rest pads under a deck patch load.',
+    icon: 'ph-square-half',
+    volfrac: 0.28,
+    resolution: PLATE,
+    build: createPadTableScene,
+  },
+  {
+    id: 'insert_block',
+    title: 'Insert block',
+    blurb: 'Wall mount with a kept solid block and a tip load.',
+    icon: 'ph-cube',
+    volfrac: 0.3,
+    resolution: PLATE,
+    build: createInsertBlockScene,
+  },
+  {
+    id: 'roller_beam',
+    title: 'Roller beam',
+    blurb: 'Clamped wall, floor roller (vertical only), line load on top.',
+    icon: 'ph-arrows-horizontal',
+    volfrac: 0.3,
+    resolution: PLATE,
+    build: createRollerBeamScene,
   },
 ];
