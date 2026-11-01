@@ -17,6 +17,8 @@ const { Emin, E0, maxIters, cgTol } = FEA_CONSTANTS;
  *   globalU: Float32Array | null,
  *   KE: Float32Array,
  *   elementEnergies?: Float32Array,
+ *   fixedDofs?: Uint8Array,
+ *   F?: Float32Array,
  * }} params
  * @returns {{
  *   dc: Float32Array,
@@ -38,14 +40,26 @@ export function solveFEA({
   globalU,
   KE,
   elementEnergies,
+  fixedDofs: fixedDofsIn = null,
+  F: FIn = null,
 }) {
   const totalElements = nx * ny * nz;
   const nNodes = (nx + 1) * (ny + 1) * (nz + 1);
   const totalDofs = 3 * nNodes;
 
-  const fixedDofs = new Uint8Array(totalDofs);
-  const F = new Float32Array(totalDofs);
-  applyBCs(fixedDofs, F, nx, ny, nz, preset, scene, loadCase);
+  let fixedDofs;
+  let F;
+  if (fixedDofsIn || FIn) {
+    if (!fixedDofsIn || !FIn || fixedDofsIn.length !== totalDofs || FIn.length !== totalDofs) {
+      throw new Error('solveFEA fixedDofs and F must both cover every DOF');
+    }
+    fixedDofs = fixedDofsIn;
+    F = FIn;
+  } else {
+    fixedDofs = new Uint8Array(totalDofs);
+    F = new Float32Array(totalDofs);
+    applyBCs(fixedDofs, F, nx, ny, nz, preset, scene, loadCase);
+  }
 
   const diag = new Float32Array(totalDofs);
   const edofs = new Int32Array(24);

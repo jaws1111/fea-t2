@@ -8,6 +8,8 @@ import { buildPassiveMask } from '../src/scene/passiveVoids.js';
 import { createComponent, normalizeScene } from '../src/scene/types.js';
 import { resolveRecipe } from '../src/library/apply.js';
 import { getRecipe } from '../src/library/store.js';
+import { createSolverState } from '../src/topo/solverState.js';
+import { stepSIMP } from '../src/topo/simpStep.js';
 
 const oracle = JSON.parse(readFileSync(new URL('./fixtures/archetype-bc.json', import.meta.url), 'utf8'));
 const EXACT = new Set(['bridge', 'cantilever', 'mbb']);
@@ -58,6 +60,39 @@ function applyRecipe(key, budget) {
 const sameIdx = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 const sameLoads = (a, b) => a.length === b.length && a.every((v, i) => v[0] === b[i][0] && v[1] === b[i][1]);
 
+const SIMP = { volfrac: 0.3, penal: 3, rmin: 1.5, iters: 4 };
+
+function oracleBC(row) {
+  const n = (row.nx + 1) * (row.ny + 1) * (row.nz + 1);
+  const fixedDofs = new Uint8Array(3 * n);
+  const F = new Float32Array(3 * n);
+  const buf = new ArrayBuffer(4);
+  const bits = new Uint32Array(buf);
+  const value = new Float32Array(buf);
+  for (const i of row.fixedIdx) fixedDofs[i] = 1;
+  for (const [dof, word] of row.loads) {
+    bits[0] = word;
+    F[dof] = value[0];
+  }
+  return { fixedDofs, F };
+}
+
+function compliance4(dims, scene, bc) {
+  const state = createSolverState({
+    nx: dims.nx,
+    ny: dims.ny,
+    nz: dims.nz,
+    volfrac: SIMP.volfrac,
+    penal: SIMP.penal,
+    rmin: SIMP.rmin,
+    preset: 'custom',
+    scene,
+  });
+  let last;
+  for (let i = 0; i < SIMP.iters; i++) last = stepSIMP(state, bc);
+  return last.compliance;
+}
+
 for (const [key, rows] of Object.entries(oracle)) {
   for (const row of rows) {
     const got = applyRecipe(key, row.budget);
@@ -66,19 +101,24 @@ for (const [key, rows] of Object.entries(oracle)) {
       `${key} @${row.budget}: grid ${got.nx}x${got.ny}x${got.nz}, oracle ${row.nx}x${row.ny}x${row.nz}`,
     );
     check(sameIdx(got.fixedIdx, row.fixedIdx), `${key} @${row.budget}: fixed DOFs differ (${got.fixedIdx.length} vs ${row.fixedIdx.length})`);
-    if (EXACT.has(key)) {
+    if (EXACT.has(key) || key === 'deck') {
       check(sameLoads(got.loads, row.loads), `${key} @${row.budget}: load vector is not the captured preset`);
-    } else if (key === 'deck') {
-      const gotSet = new Set(got.loads.map((v) => v[0]));
-      const missing = row.loads.filter((v) => !gotSet.has(v[0]));
-      const oracleSet = new Set(row.loads.map((v) => v[0]));
-      const extras = got.loads.filter((v) => !oracleSet.has(v[0])).map((v) => nodeOf(v[0], got.nx, got.ny));
-      check(missing.length === 0, `${key} @${row.budget}: recipe dropped ${missing.length} preset load nodes`);
+    }
+    if (key === 'deck') {
       check(
-        extras.every((p) => p.comp === 1 && (p.ix === 0 || p.ix === got.nx) && p.iy === got.ny),
-        `${key} @${row.budget}: extra loads are not the two top edge columns`,
+        buildPassiveMask(got.nx, got.ny, got.nz, got.scene) == null,
+        `${key} @${row.budget}: recipe adds passive material`,
       );
-      check(Math.abs(got.fy - row.fy) < 1e-6, `${key} @${row.budget}: resultant ${got.fy} vs ${row.fy}`);
+      const presetC = compliance4(got, got.scene, oracleBC(row));
+      const recipeC = compliance4(got, got.scene);
+      const rel = Math.abs(recipeC - presetC) / Math.abs(presetC);
+      console.log(
+        `  deck @${row.budget}: compliance ${recipeC} vs preset ${presetC} (${(rel * 100).toFixed(4)}%, ${SIMP.iters} iters, volfrac ${SIMP.volfrac}, penal ${SIMP.penal}, rmin ${SIMP.rmin})`,
+      );
+      check(
+        rel <= 0.01,
+        `${key} @${row.budget}: compliance ${(rel * 100).toFixed(2)}% off the preset (${recipeC} vs ${presetC})`,
+      );
     } else if (key === 'michell') {
       check(Math.abs(got.fy - row.fy) < 1e-6, `${key} @${row.budget}: resultant ${got.fy} vs ${row.fy}`);
       const cols = new Map();

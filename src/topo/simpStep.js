@@ -12,8 +12,14 @@ const XMIN = 0.001;
  * One SIMP optimization iteration (FEA → filter → OC update).
  *
  * @param {import('./solverState.js').SolverState} state
- * @param {{ KE?: Float32Array, feaResult?: ReturnType<typeof solveFEA> & { feaMs?: number } }} [options]
+ * @param {{
+ *   KE?: Float32Array,
+ *   feaResult?: ReturnType<typeof solveFEA> & { feaMs?: number },
+ *   fixedDofs?: Uint8Array,
+ *   F?: Float32Array,
+ * }} [options]
  *   feaResult: precomputed FEA solve (e.g. from the GPU backend); skips the CPU solve.
+ *   fixedDofs and F, when both are set, replace the scene boundary conditions for that solve.
  * @returns {{
  *   iteration: number,
  *   compliance: number,
@@ -49,6 +55,8 @@ export function stepSIMP(state, options = {}) {
       globalU: state.globalU,
       KE,
       elementEnergies: state.elementEnergies,
+      fixedDofs: options.fixedDofs,
+      F: options.F,
     }));
   state.globalU = feaResult.U;
   const tFeaEnd = performance.now();
