@@ -17,7 +17,7 @@ import { createRigidLink, ensureLinks, pruneLinks } from './links.js';
 import { createDefaultWorkingVolume } from './workingVolume.js';
 
 /**
- * @typedef {'rest_point'|'bolt_hole'|'wall_pad'|'point_load'|'pressure'} ComponentType
+ * @typedef {'rest_point'|'bolt_hole'|'wall_pad'|'point_load'|'pressure'|'rest_line'|'line_load'|'face_load'} ComponentType
  * @typedef {'x'|'y'|'z'} Axis
  * @typedef {'x-'|'x+'|'y-'|'y+'|'z-'|'z+'} Face
  * @typedef {'none'|'directional'|'multi'|'circular'} BoltLoadMode

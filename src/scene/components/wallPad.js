@@ -3,6 +3,21 @@ import { toXYZ } from '../geometry.js';
 import { nextId } from './ids.js';
 import { anyFix, applyFixFlags, faceFrame, num, stripUndefined } from './shared.js';
 
+function symmetryGlyphs(c, dims) {
+  const { nx, ny, nz } = dims;
+  const frame = faceFrame(c.face, dims);
+  const [u, v] = [c[frame.perp[0]], c[frame.perp[1]]];
+  /** @type {{ kind: 'sym', id: string, ix: number, iy: number, iz: number }[]} */
+  const out = [];
+  forNodesOnFacePatch(nx, ny, nz, frame.face, u, v, c.width ?? 1, c.height ?? 1, 1, (ix, iy, iz) => {
+    if ((ix + iy + iz) % 2 !== 0) return;
+    if (out.length >= 24) return;
+    out.push({ kind: 'sym', id: c.id, ix, iy, iz });
+  });
+  return out;
+}
+
+
 export const wallPad = {
   type: 'wall_pad',
   family: 'wall',
@@ -24,6 +39,7 @@ export const wallPad = {
       fixX: true,
       fixY: true,
       fixZ: true,
+      solid: true,
     };
     return { ...base, ...stripUndefined(partial), type: 'wall_pad' };
   },
@@ -45,6 +61,7 @@ export const wallPad = {
   },
 
   paintSolid(c, ctx) {
+    if (c.solid === false) return;
     const frame = faceFrame(c.face, ctx.dims);
     const { axis, high, perp, n } = frame;
     const layers = Math.max(2, Math.round(c.depth ?? 2));
@@ -99,6 +116,8 @@ export const wallPad = {
   },
 
   glyphs(c, dims) {
+    const fixes = [c.fixX !== false, c.fixY !== false, c.fixZ !== false].filter(Boolean).length;
+    if (fixes === 1) return symmetryGlyphs(c, dims);
     const { nx, ny, nz } = dims;
     const frame = faceFrame(c.face, dims);
     const p = normToNodeIndices(nx, ny, nz, c.x, c.y, c.z);

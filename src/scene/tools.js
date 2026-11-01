@@ -250,6 +250,44 @@ export function forNodesOnBoxShell(nx, ny, nz, cx, cy, cz, hx, hy, hz, cb) {
 }
 
 /**
+ * Nodes on an axis-aligned line. `len` is a fraction of that axis, centred on the
+ * component's own coordinate (same rule as a bolt hole's `len`). The other two
+ * coordinates snap to one node. `len` 1 at mid-axis is the whole edge, inclusive.
+ * @param {number} nx @param {number} ny @param {number} nz
+ * @param {'x'|'y'|'z'} axis
+ * @param {number} x @param {number} y @param {number} z
+ * @param {number} len
+ * @param {(ix:number, iy:number, iz:number, dist:number) => void} cb
+ * @returns {number}
+ */
+export function forNodesOnLine(nx, ny, nz, axis, x, y, z, len, cb) {
+  const ax = axis === 'x' || axis === 'y' || axis === 'z' ? axis : 'z';
+  const nAlong = ax === 'x' ? nx : ax === 'y' ? ny : nz;
+  const centre = ax === 'x' ? x : ax === 'y' ? y : z;
+  const c = Number.isFinite(centre) ? centre : 0.5;
+  const span = Math.min(1, Math.max(0, Number.isFinite(len) ? len : 1));
+  const s0 = Math.max(0, c - span / 2);
+  const s1 = Math.min(1, c + span / 2);
+  let a0 = normToNode(s0, nAlong);
+  let a1 = normToNode(s1, nAlong);
+  if (a1 < a0) {
+    const swap = a0;
+    a0 = a1;
+    a1 = swap;
+  }
+  const p = normToNodeIndices(nx, ny, nz, x, y, z);
+  let count = 0;
+  for (let a = a0; a <= a1; a++) {
+    const ix = ax === 'x' ? a : p.ix;
+    const iy = ax === 'y' ? a : p.iy;
+    const iz = ax === 'z' ? a : p.iz;
+    cb(ix, iy, iz, 0);
+    count++;
+  }
+  return count;
+}
+
+/**
  * Rectangular patch of nodes on a domain face.
  * Face 'x-'/'x+' → in-plane axes (y, z); 'y-'/'y+' → (x, z); 'z-'/'z+' → (x, y).
  * @param {number} nx @param {number} ny @param {number} nz
@@ -260,9 +298,10 @@ export function forNodesOnBoxShell(nx, ny, nz, cx, cy, cz, hx, hy, hz, cb) {
  * @param {number} height  normalized size along second in-plane axis
  * @param {number} depth   number of node layers into the domain (>=1)
  * @param {(ix:number, iy:number, iz:number, dist:number) => void} cb
+ * @param {number} [inset=0] cells trimmed from each end of the width axis
  * @returns {number}
  */
-export function forNodesOnFacePatch(nx, ny, nz, face, u, v, width, height, depth, cb) {
+export function forNodesOnFacePatch(nx, ny, nz, face, u, v, width, height, depth, cb, inset = 0) {
   const axis = face[0];
   const high = face[1] === '+';
   const dims = { x: nx, y: ny, z: nz };
@@ -276,8 +315,13 @@ export function forNodesOnFacePatch(nx, ny, nz, face, u, v, width, height, depth
     const hi = clamp(Math.round((c + half) * n), 0, n);
     return [Math.min(lo, hi), Math.max(lo, hi)];
   };
-  const [u0, u1] = range(u, width, nU);
+  let [u0, u1] = range(u, width, nU);
   const [v0, v1] = range(v, height, nV);
+  const trim = Math.max(0, Math.round(Number.isFinite(inset) ? inset : 0));
+  if (trim > 0) {
+    u0 += trim;
+    u1 -= trim;
+  }
   const layers = Math.max(1, Math.round(depth || 1));
   const xyz = [0, 0, 0];
   let count = 0;
