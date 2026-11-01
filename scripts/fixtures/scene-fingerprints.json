@@ -65,6 +65,69 @@
       "sha256": "823b24a28f4881ca813cad4569448599a84473f9475bc66e4799310527fc5fad"
     },
     {
+      "id": "sleeve_link",
+      "dims": [
+        24,
+        24,
+        24
+      ],
+      "sha256": "2b3ce5d93bd4dbba1ec03056c2f8106a99a9c7896480e24bdf5caad2812231d5"
+    },
+    {
+      "id": "hex_mast",
+      "dims": [
+        24,
+        24,
+        24
+      ],
+      "sha256": "9dbf6c1e34d072d5973fff3e3616fb030f266f507ce638be88693441713ac8fd"
+    },
+    {
+      "id": "ball_socket",
+      "dims": [
+        24,
+        24,
+        24
+      ],
+      "sha256": "2a9498337dece6b23373e4835d8728ce771930e8f01d140a579d752053a6206c"
+    },
+    {
+      "id": "ring_pedestal",
+      "dims": [
+        24,
+        24,
+        24
+      ],
+      "sha256": "07356a2af2dc34634a0c3764f88fd78fda31f31fc0b0e851d21a0fb8e986a4ee"
+    },
+    {
+      "id": "pad_table",
+      "dims": [
+        36,
+        15,
+        8
+      ],
+      "sha256": "c55b787a6997411759e26deb51c4a3334b2e3c8367f6d6980088ebab5f192c8f"
+    },
+    {
+      "id": "insert_block",
+      "dims": [
+        36,
+        15,
+        8
+      ],
+      "sha256": "816baf8867ed6e812f81c417200055b710c2c8ceab87c50c588053c40d611e51"
+    },
+    {
+      "id": "roller_beam",
+      "dims": [
+        36,
+        15,
+        8
+      ],
+      "sha256": "310705b4219de2f6f2064b15a1eafaf8700bfdc9ee963391d97872cd0df1011d"
+    },
+    {
       "id": "legacy_v1_bolt_bearing",
       "dims": [
         36,

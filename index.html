@@ -282,56 +282,120 @@
           Drag viewport markers with the gizmo.
         </p>
 
-        <div id="scene-examples" class="grid grid-cols-2 gap-1.5"></div>
-
-        <div class="space-y-1">
-          <div class="section-label">Add</div>
-          <div class="grid grid-cols-4 gap-1">
-            <button id="btn-add-bolt-pair" class="btn-tool !py-1 col-span-2" type="button" title="Clamped hole + loaded hole, rigidly linked (bracket starter)"><i class="ph ph-link"></i> Bolt pair</button>
-            <button id="btn-add-bolt-hole" class="btn-tool !py-1" type="button" title="Clamped bolt hole (void bore + solid boss, fixed)"><i class="ph ph-circle"></i> Fixed</button>
-            <button id="btn-add-bolt-loaded" class="btn-tool !py-1" type="button" title="Loaded bolt hole: directional, multi-vector or circular load on the bore"><i class="ph ph-arrows-clockwise"></i> Loaded</button>
-            <button id="btn-add-wall-pad" class="btn-tool !py-1" type="button" title="Wall mounting pad"><i class="ph ph-square"></i> Wall</button>
-            <button id="btn-add-rest" class="btn-tool !py-1" type="button" title="Rest / foot support"><i class="ph ph-map-pin"></i> Rest</button>
-            <div id="point-menu-wrap" class="relative flex">
-              <button id="btn-add-point-load" class="btn-tool !py-1 min-w-0 flex-1 !rounded-r-none" type="button" title="Point load, single force axis"><i class="ph ph-arrow-down"></i> Point</button>
-              <button id="btn-add-point-menu" class="btn-tool !py-1 !rounded-l-none !border-l-0 !px-1" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Point load axes" title="Point load with 2–6 force axes"><i class="ph ph-caret-down"></i></button>
-              <div id="point-menu" role="menu" class="glass-panel absolute right-0 top-full z-30 mt-1 hidden w-44 space-y-0.5 rounded-lg p-1 text-[11px] shadow-xl">
-                <button type="button" role="menuitem" data-point-axes="1" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">1 axis <span class="text-slate-500">· single force</span></button>
-                <button type="button" role="menuitem" data-point-axes="2" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">2 axes</button>
-                <button type="button" role="menuitem" data-point-axes="3" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">3 axes</button>
-                <button type="button" role="menuitem" data-point-axes="4" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">4 axes</button>
-                <button type="button" role="menuitem" data-point-axes="5" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">5 axes</button>
-                <button type="button" role="menuitem" data-point-axes="6" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">6 axes <span class="text-slate-500">· all directions</span></button>
+        <details id="fold-library" class="scene-fold" open>
+          <summary>Library</summary>
+          <div class="scene-fold-body space-y-1">
+            <p id="library-status" class="text-[10px] leading-snug text-indigo-300" aria-live="polite"></p>
+            <div class="section-label">Classic problems</div>
+            <ul id="list-library-classic" class="library-list"></ul>
+            <div class="section-label">Examples</div>
+            <ul id="list-library-examples" class="library-list"></ul>
+            <div class="section-label">My objects</div>
+            <ul id="list-library-user" class="library-list"></ul>
+            <form id="library-save-form" class="hidden space-y-1 rounded border border-slate-700 bg-slate-900/70 p-1.5">
+              <label class="flex flex-col gap-0.5 text-[10px] text-slate-400" for="input-library-name">Name
+                <input id="input-library-name" type="text" maxlength="80" class="rounded border border-slate-700 bg-slate-950 px-1.5 py-1 text-[11px] text-slate-200" />
+              </label>
+              <p id="library-save-note" class="hidden text-[10px] text-amber-200"></p>
+              <div class="flex gap-1">
+                <button id="btn-library-save-confirm" class="btn-secondary !py-1 text-[10px]" type="submit">Save</button>
+                <button id="btn-library-save-cancel" class="btn-secondary !py-1 text-[10px]" type="button">Cancel</button>
               </div>
+            </form>
+            <div class="grid grid-cols-3 gap-1">
+              <button id="btn-library-save" class="btn-secondary !py-1 text-[10px]" type="button">Save current…</button>
+              <button id="btn-library-import" class="btn-secondary !py-1 text-[10px]" type="button">Import</button>
+              <button id="btn-library-export" class="btn-secondary !py-1 text-[10px]" type="button">Export all</button>
             </div>
-            <button id="btn-add-pressure" class="btn-tool !py-1" type="button" title="Pressure cavity (void + locked wall)"><i class="ph ph-waves"></i> Press</button>
+            <input id="input-library-import" type="file" accept=".json,application/json" hidden />
           </div>
-        </div>
+        </details>
 
-        <div class="space-y-1">
-          <div class="flex items-center justify-between">
-            <div class="section-label">Objects</div>
-            <button id="btn-scene-undo" class="text-[10px] text-slate-400 hover:text-indigo-300" type="button" title="Ctrl+Z">Undo</button>
+        <details id="fold-add" class="scene-fold" open>
+          <summary>Add</summary>
+          <div class="scene-fold-body space-y-0.5">
+            <details id="fold-add-wall" class="scene-fold">
+              <summary>Wall</summary>
+              <div class="grid grid-cols-2 gap-1 pb-1">
+                <button id="btn-add-wall-pad" class="btn-tool !py-1" type="button" data-add="wall_pad" title="Wall mounting pad"><i class="ph ph-square"></i> Pad</button>
+                <button id="btn-add-wall-cylinder" class="btn-tool !py-1" type="button" data-add="wall_cylinder" title="Cylindrical wall, inner and outer surfaces"><i class="ph ph-cylinder"></i> Cylinder</button>
+                <button id="btn-add-wall-prism" class="btn-tool !py-1" type="button" data-add="wall_prism" title="n-gon prism wall"><i class="ph ph-hexagon"></i> Prism</button>
+                <button id="btn-add-surround" class="btn-tool !py-1" type="button" data-add="surround" title="Closed surround, sphere or n-gon"><i class="ph ph-sphere"></i> Surround</button>
+              </div>
+            </details>
+            <details id="fold-add-rest" class="scene-fold">
+              <summary>Rest</summary>
+              <div class="grid grid-cols-2 gap-1 pb-1">
+                <button id="btn-add-rest" class="btn-tool !py-1" type="button" data-add="rest_point" title="Rest / foot support"><i class="ph ph-map-pin"></i> Point</button>
+                <button id="btn-add-rest-line" class="btn-tool !py-1" type="button" data-add="rest_line" title="Rest along a line"><i class="ph ph-line-segment"></i> Line</button>
+                <button id="btn-add-rest-ring" class="btn-tool !py-1" type="button" data-add="rest_ring" title="Ring rest"><i class="ph ph-circle"></i> Ring</button>
+                <button id="btn-add-rest-pad" class="btn-tool !py-1" type="button" data-add="rest_pad" title="Small rest pad"><i class="ph ph-square-half"></i> Pad</button>
+              </div>
+            </details>
+            <details id="fold-add-fixload" class="scene-fold" open>
+              <summary>Fix + Load</summary>
+              <div class="grid grid-cols-2 gap-1 pb-1">
+                <button id="btn-add-bolt-pair" class="btn-tool !py-1 col-span-2" type="button" title="Clamped hole + loaded hole, rigidly linked (bracket starter)"><i class="ph ph-link"></i> Bolt pair</button>
+                <button id="btn-add-bolt-hole" class="btn-tool !py-1" type="button" data-add="bolt_hole" title="Clamped bolt hole (void bore + solid boss, fixed)"><i class="ph ph-circle"></i> Fixed hole</button>
+                <button id="btn-add-bolt-loaded" class="btn-tool !py-1" type="button" title="Loaded bolt hole: directional, multi-vector or circular load on the bore"><i class="ph ph-arrows-clockwise"></i> Loaded hole</button>
+                <div id="point-menu-wrap" class="relative flex">
+                  <button id="btn-add-point-load" class="btn-tool !py-1 min-w-0 flex-1 !rounded-r-none" type="button" title="Point load, single force axis"><i class="ph ph-arrow-down"></i> Point</button>
+                  <button id="btn-add-point-menu" class="btn-tool !py-1 !rounded-l-none !border-l-0 !px-1" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Point load axes" title="Point load with 2–6 force axes"><i class="ph ph-caret-down"></i></button>
+                  <div id="point-menu" role="menu" class="glass-panel absolute right-0 top-full z-30 mt-1 hidden w-44 space-y-0.5 rounded-lg p-1 text-[11px] shadow-xl">
+                    <button type="button" role="menuitem" data-point-axes="1" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">1 axis <span class="text-slate-500">· single force</span></button>
+                    <button type="button" role="menuitem" data-point-axes="2" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">2 axes</button>
+                    <button type="button" role="menuitem" data-point-axes="3" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">3 axes</button>
+                    <button type="button" role="menuitem" data-point-axes="4" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">4 axes</button>
+                    <button type="button" role="menuitem" data-point-axes="5" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">5 axes</button>
+                    <button type="button" role="menuitem" data-point-axes="6" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">6 axes <span class="text-slate-500">· all directions</span></button>
+                  </div>
+                </div>
+                <button id="btn-add-line-load" class="btn-tool !py-1" type="button" data-add="line_load" data-add-kind="force" title="Load along a line"><i class="ph ph-arrow-line-down"></i> Line load</button>
+                <button id="btn-add-face-load" class="btn-tool !py-1" type="button" data-add="face_load" data-add-kind="force" title="Load on a face patch"><i class="ph ph-square-half"></i> Face load</button>
+                <button id="btn-add-pressure" class="btn-tool !py-1" type="button" data-add="pressure" data-add-kind="force" title="Pressure cavity (void + locked wall)"><i class="ph ph-waves"></i> Pressure</button>
+                <button id="btn-add-roller" class="btn-tool !py-1" type="button" title="Floor roller: vertical DOF fixed, no solid pad"><i class="ph ph-arrows-horizontal"></i> Roller</button>
+                <button id="btn-add-block" class="btn-tool !py-1" type="button" data-add="block" title="Solid or void block"><i class="ph ph-cube"></i> Block</button>
+              </div>
+            </details>
+            <details id="fold-add-volume" class="scene-fold">
+              <summary>Volume</summary>
+              <div class="grid grid-cols-3 gap-1 pb-1">
+                <button id="wv-shape-box" class="btn-secondary !py-1 text-[10px]" type="button" aria-pressed="true" title="Designable box">Box</button>
+                <button id="wv-shape-sphere" class="btn-secondary !py-1 text-[10px]" type="button" aria-pressed="false" title="Largest sphere inside the box">Sphere</button>
+                <button id="wv-shape-cylinder" class="btn-secondary !py-1 text-[10px]" type="button" aria-pressed="false" title="Largest cylinder inside the box">Cylinder</button>
+              </div>
+            </details>
           </div>
-          <ul id="list-scene-objects" class="scene-list max-h-40 space-y-0.5 overflow-y-auto"></ul>
-          <div id="scene-warnings" class="hidden space-y-0.5 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] leading-snug text-amber-200"></div>
-        </div>
+        </details>
 
-        <div id="scene-inspector" class="hidden space-y-1.5 rounded-lg border border-slate-700 bg-slate-900/70 p-2">
-          <div class="flex items-center justify-between">
-            <span id="inspector-title" class="text-xs font-semibold text-slate-200">Edit</span>
-            <button id="btn-inspector-delete" class="text-[11px] text-rose-400 hover:text-rose-300" type="button" title="Delete (Del)">Delete</button>
+        <details id="fold-objects" class="scene-fold" open>
+          <summary>
+            <span id="fold-objects-label">Objects (0)</span>
+            <span id="fold-objects-dot" class="fold-dot hidden" aria-hidden="true"></span>
+          </summary>
+          <div class="scene-fold-body space-y-1">
+            <div class="flex justify-end">
+              <button id="btn-scene-undo" class="text-[10px] text-slate-400 hover:text-indigo-300" type="button" title="Ctrl+Z">Undo</button>
+            </div>
+            <ul id="list-scene-objects" class="scene-list max-h-40 space-y-0.5 overflow-y-auto"></ul>
+            <div id="scene-warnings" class="hidden space-y-0.5 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] leading-snug text-amber-200"></div>
           </div>
-          <div id="inspector-fields" class="grid grid-cols-2 gap-1.5 text-[11px]"></div>
-        </div>
+        </details>
 
-        <div class="space-y-1.5 rounded-lg border border-slate-800 bg-slate-900/40 p-2">
-          <div class="section-label">Working volume</div>
-          <div class="grid grid-cols-3 gap-1">
-            <button id="wv-shape-box" class="btn-secondary !py-1 text-[10px]" type="button" aria-pressed="true" title="Designable box">Box</button>
-            <button id="wv-shape-sphere" class="btn-secondary !py-1 text-[10px]" type="button" aria-pressed="false" title="Largest sphere inside the box">Sphere</button>
-            <button id="wv-shape-cylinder" class="btn-secondary !py-1 text-[10px]" type="button" aria-pressed="false" title="Largest cylinder inside the box">Cylinder</button>
+        <details id="fold-inspector" class="scene-fold">
+          <summary><span id="fold-inspector-label">Inspector</span></summary>
+          <div id="scene-inspector" class="scene-fold-body space-y-1.5 rounded-lg border border-slate-700 bg-slate-900/70 p-2">
+            <div class="flex items-center justify-between">
+              <span id="inspector-title" class="text-xs font-semibold text-slate-200">Inspector</span>
+              <button id="btn-inspector-delete" class="text-[11px] text-rose-400 hover:text-rose-300" type="button" title="Delete (Del)">Delete</button>
+            </div>
+            <div id="inspector-fields" class="grid grid-cols-2 gap-1.5 text-[11px]"></div>
           </div>
+        </details>
+
+        <details id="fold-wv" class="scene-fold">
+          <summary><span id="fold-wv-label">Working volume · Box auto</span></summary>
+          <div class="scene-fold-body space-y-1.5 rounded-lg border border-slate-800 bg-slate-900/40 p-2">
           <div class="grid grid-cols-3 gap-1">
             <button id="wv-mode-full" class="btn-secondary !py-1 text-[10px]" type="button" data-wv-mode="full" title="Shape fills the FEA domain">Full</button>
             <button id="wv-mode-auto" class="btn-secondary !py-1 text-[10px]" type="button" data-wv-mode="auto" title="Fit the shape around supports and loads, plus margin">Auto</button>
@@ -361,7 +425,8 @@
             <button id="btn-wv-refit" class="text-indigo-300 hover:text-indigo-200" type="button" title="Recompute the box around all objects (+ padding)">Refit auto</button>
             <button id="btn-wv-fit" class="ml-auto text-emerald-300 hover:text-emerald-200" type="button" title="Crop the FEA domain to this box: grid proportions = working-volume proportions, no wasted void cells">Fit domain</button>
           </div>
-        </div>
+          </div>
+        </details>
 
         <div class="grid grid-cols-2 gap-1.5 border-t border-slate-800 pt-2">
           <button id="btn-scene-clear" class="btn-secondary !py-1.5" type="button" title="Remove all objects">Clear</button>
