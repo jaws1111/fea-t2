@@ -49,8 +49,9 @@ function line(id, x, y, magnitude) {
  * @param {string} blurb
  * @param {{ x: number, y: number, z: number }} domain
  * @param {object[]} components
+ * @param {string} [icon]
  */
-function classic(id, name, blurb, domain, components) {
+function classic(id, name, blurb, domain, components, icon) {
   return {
     id: `builtin:${id}`,
     name,
@@ -61,7 +62,7 @@ function classic(id, name, blurb, domain, components) {
       links: [],
       workingVolume: fullVolume(),
     }),
-    meta: { blurb, group: 'classic', domain },
+    meta: { blurb, group: 'classic', domain, icon },
   };
 }
 
@@ -72,6 +73,7 @@ const CLASSIC = [
     'Pinned at both bottom corners, one line load at mid-span on top.',
     { x: 2.4, y: 1, z: 8 / 15 },
     [pier('bridge-left', 0), pier('bridge-right', 1), line('bridge-load', 0.5, 1, 1)],
+    'ph-bridge',
   ),
   classic(
     'deck',
@@ -97,6 +99,7 @@ const CLASSIC = [
         magnitude: 1,
       }),
     ],
+    'ph-road-horizon',
   ),
   classic(
     'cantilever',
@@ -117,6 +120,7 @@ const CLASSIC = [
       }),
       line('cantilever-tip', 1, 0.5, 1),
     ],
+    'ph-arrow-bend-up-right',
   ),
   classic(
     'mbb',
@@ -152,6 +156,7 @@ const CLASSIC = [
       }),
       line('mbb-load', 0, 1, 0.5),
     ],
+    'ph-align-bottom',
   ),
   classic(
     'michell',
@@ -171,6 +176,7 @@ const CLASSIC = [
       line('michell-left', MICHELL_EDGE_INSET, 0, 0.5),
       line('michell-right', 1 - MICHELL_EDGE_INSET, 0, 0.5),
     ],
+    'ph-circle-half',
   ),
 ];
 

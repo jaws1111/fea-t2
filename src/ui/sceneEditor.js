@@ -6,7 +6,14 @@ import {
   normalizeScene,
 } from '../scene/types.js';
 import { componentDef, FAMILIES } from '../scene/components/index.js';
-import { listRecipes } from '../library/store.js';
+import {
+  deleteUserRecipe,
+  exportRecipes,
+  getRecipe,
+  importRecipes,
+  listRecipes,
+  saveUserRecipe,
+} from '../library/store.js';
 import {
   computeAutoWorkingBounds,
   ensureWorkingVolume,
@@ -34,6 +41,30 @@ import {
 } from '../scene/pointLoad.js';
 
 const $ = (id) => document.getElementById(id);
+
+const FOLD_KEY = 'topoopt.ui.sceneFolds.v1';
+const FOLD_IDS = [
+  'fold-library',
+  'fold-add',
+  'fold-add-wall',
+  'fold-add-rest',
+  'fold-add-fixload',
+  'fold-add-volume',
+  'fold-objects',
+  'fold-inspector',
+  'fold-wv',
+];
+const FOLD_DEFAULTS = {
+  'fold-library': true,
+  'fold-add': true,
+  'fold-add-wall': false,
+  'fold-add-rest': false,
+  'fold-add-fixload': true,
+  'fold-add-volume': false,
+  'fold-objects': true,
+  'fold-inspector': false,
+  'fold-wv': false,
+};
 
 const MAX_UNDO = 40;
 /** Default spread (fraction of the longest side) of a multi-axis point load. */
@@ -86,6 +117,14 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
 
   /** @type {{ id: string } | null} */
   let selected = null;
+  /** Selection the inspector fold last opened for. Null means the fold follows the user. */
+  let inspectorFor = null;
+  /** @type {string | null} */
+  let actionFor = null;
+  /** @type {string | null} */
+  let deleteFor = null;
+  /** @type {string | null} */
+  let renameFor = null;
   /** @type {{ scene: import('../scene/types.js').Scene, recipeId: string | null }[]} */
   const undoStack = [];
   /** @type {'optimize'|'scene'|'stage'} */
@@ -105,12 +144,41 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
   }
 
   function highlightRecipe() {
-    const root = $('scene-examples');
-    if (!root) return;
-    root.querySelectorAll('[data-recipe]').forEach((btn) => {
-      const on = btn.dataset.recipe === config.recipeId;
-      btn.classList.toggle('is-active', on);
+    document.querySelectorAll('#panel-scene [data-recipe-id]').forEach((row) => {
+      const active = row.dataset.recipeId === config.recipeId;
+      row.classList.toggle('is-active', active);
+      if (active) row.setAttribute('aria-current', 'true');
+      else row.removeAttribute('aria-current');
     });
+  }
+
+  function readFoldState() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(FOLD_KEY) || 'null');
+      if (raw && typeof raw === 'object') return raw;
+    } catch {
+      // A bad value falls back to the first-run defaults.
+    }
+    return {};
+  }
+
+  function bindFolds() {
+    const saved = readFoldState();
+    for (const id of FOLD_IDS) {
+      const el = $(id);
+      if (!el) continue;
+      on(el, 'toggle', () => {
+        const next = readFoldState();
+        next[id] = el.open;
+        try {
+          localStorage.setItem(FOLD_KEY, JSON.stringify(next));
+        } catch {
+          // Fold memory is optional. A full store still keeps the scene.
+        }
+      });
+      const open = typeof saved[id] === 'boolean' ? saved[id] : FOLD_DEFAULTS[id];
+      el.open = open;
+    }
   }
 
   function undo() {
@@ -137,6 +205,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     renderWorkingVolumeUI();
     renderWarnings();
     highlightRecipe();
+    refreshSaveButton();
   }
 
   /* ------------------------------ Warnings ------------------------------ */
@@ -153,6 +222,8 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
         console.warn('[scene] analysis failed', err);
       }
     }
+    const dot = $('fold-objects-dot');
+    dot?.classList.toggle('hidden', !warnings.length);
     if (!warnings.length) {
       el.classList.add('hidden');
       el.innerHTML = '';
@@ -223,6 +294,9 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
 
   function renderObjectList() {
     const ul = $('list-scene-objects');
+    const count = ensureScene().components?.length ?? 0;
+    const label = $('fold-objects-label');
+    if (label) label.textContent = `Objects (${count})`;
     if (!ul) return;
     const rows = allObjects();
     if (!rows.some((r) => r.id)) {
@@ -518,17 +592,26 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
   }
 
   function renderInspector() {
-    const panel = $('scene-inspector');
     const fields = $('inspector-fields');
     const title = $('inspector-title');
+    const fold = $('fold-inspector');
+    const foldLabel = $('fold-inspector-label');
     const item = findSelected();
-    if (!panel || !fields) return;
+    if (!fields) return;
+    $('btn-inspector-delete')?.classList.toggle('hidden', !item);
     if (!item) {
-      panel.classList.add('hidden');
+      if (fold && inspectorFor) fold.open = false;
+      inspectorFor = null;
+      if (foldLabel) foldLabel.textContent = 'Inspector';
+      if (title) title.textContent = 'Inspector';
+      fields.innerHTML = '';
       return;
     }
-    panel.classList.remove('hidden');
-    if (title) title.textContent = componentDef(item.type)?.label ?? item.type;
+    const name = componentDef(item.type)?.label ?? item.type;
+    if (title) title.textContent = name;
+    if (foldLabel) foldLabel.textContent = `Inspector · ${name}`;
+    if (fold && inspectorFor !== item.id) fold.open = true;
+    inspectorFor = item.id;
 
     // Keep focus/scroll stable while re-rendering after an edit.
     const activeKey = document.activeElement?.dataset?.key;
@@ -729,31 +812,402 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     selectItem(li.dataset.id);
   });
 
-  on($('btn-add-rest'), 'click', () => addFixation('rest_point'));
-  on($('btn-add-bolt-hole'), 'click', () => addFixation('bolt_hole'));
-  on($('btn-add-bolt-loaded'), 'click', () => addLoadedHole());
-  on($('btn-add-wall-pad'), 'click', () => addFixation('wall_pad'));
-  on($('btn-add-point-load'), 'click', () => addPointLoad(1));
-  on($('btn-add-pressure'), 'click', () => addForce('pressure'));
-  on($('btn-add-bolt-pair'), 'click', () => addBoltPair());
-
-  /* ------------------------------ Examples ------------------------------ */
-  const examplesEl = $('scene-examples');
-  if (examplesEl) {
-    const examples = listRecipes().filter((r) => r.meta?.group === 'example');
-    examplesEl.innerHTML = examples
-      .map(
-        (ex) => `<button type="button" class="btn-secondary !py-1.5 text-[10px]" data-recipe="${ex.id}" title="${ex.meta?.blurb ?? ''}">
-        <i class="ph ${ex.meta?.icon ?? 'ph-cube'}"></i> ${ex.name}
-      </button>`,
-      )
-      .join('');
-    on(examplesEl, 'click', (e) => {
-      const btn = e.target.closest('[data-recipe]');
-      if (!btn?.dataset.recipe) return;
-      onLoadRecipe?.(btn.dataset.recipe);
+  document.querySelectorAll('#fold-add [data-add]').forEach((btn) => {
+    on(btn, 'click', () => {
+      const type = btn.dataset.add;
+      if (!type) return;
+      if (btn.dataset.addKind === 'force') addForce(type);
+      else addFixation(type);
     });
+  });
+  on($('btn-add-bolt-loaded'), 'click', () => addLoadedHole());
+  on($('btn-add-point-load'), 'click', () => addPointLoad(1));
+  on($('btn-add-bolt-pair'), 'click', () => addBoltPair());
+  on($('btn-add-roller'), 'click', () => addFixation('wall_pad', {
+    face: 'y-',
+    x: 0.5,
+    y: 0,
+    z: 0.5,
+    width: 0.3,
+    height: 0.7,
+    depth: 1,
+    fixX: false,
+    fixY: true,
+    fixZ: false,
+    solid: false,
+  }));
+
+  /* ------------------------------ Library ------------------------------ */
+  function esc(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }[ch]));
   }
+
+  function setLibraryStatus(message, error = false) {
+    const el = $('library-status');
+    if (!el) return;
+    el.textContent = message;
+    el.classList.toggle('text-amber-200', error);
+    el.classList.toggle('text-indigo-300', !error);
+  }
+
+  function sceneCanSave(scene) {
+    let support = false;
+    let load = false;
+    for (const component of scene.components ?? []) {
+      const roles = componentDef(component.type)?.roles(component);
+      if (roles?.support) support = true;
+      if (roles?.load) load = true;
+    }
+    return support && load;
+  }
+
+  function refreshSaveButton() {
+    const ok = sceneCanSave(ensureScene());
+    const save = $('btn-library-save');
+    if (save) {
+      save.disabled = !ok;
+      save.title = ok ? '' : 'Add at least one support and one load first.';
+    }
+    const confirm = $('btn-library-save-confirm');
+    if (confirm) confirm.disabled = !ok;
+  }
+
+  function dateStamp() {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  }
+
+  function downloadJson(filename, text) {
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function fileSlug(name) {
+    const slug = String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    return slug || 'object';
+  }
+
+  function userByName(name) {
+    return listRecipes().find((recipe) => recipe.source === 'user' && recipe.name === name) ?? null;
+  }
+
+  function copyName(name) {
+    const taken = new Set(listRecipes().filter((recipe) => recipe.source === 'user').map((recipe) => recipe.name));
+    let next = `${name} copy`;
+    let n = 2;
+    while (taken.has(next)) {
+      next = `${name} copy ${n}`;
+      n += 1;
+    }
+    return next;
+  }
+
+  function reportStoreError(err) {
+    if (err?.code === 'QUOTA') {
+      setLibraryStatus('Browser storage is full. Export and delete some objects.', true);
+      return;
+    }
+    setLibraryStatus('Could not update My objects.', true);
+  }
+
+  function recipeRow(recipe) {
+    const active = recipe.id === config.recipeId;
+    const icon = recipe.meta?.icon || 'ph-cube';
+    const blurb = recipe.meta?.blurb || '';
+    const badge = recipe.source === 'user' ? 'Mine' : 'Built-in';
+    const open = actionFor === recipe.id;
+    let actions = '';
+    if (open && deleteFor === recipe.id) {
+      actions = `<div class="library-actions">Delete '${esc(recipe.name)}'?
+        <button type="button" data-lib-delete="${esc(recipe.id)}">Delete</button>
+        <button type="button" data-lib-cancel="1">Cancel</button>
+      </div>`;
+    } else if (open && renameFor === recipe.id) {
+      actions = `<form class="library-actions" data-lib-rename-form="${esc(recipe.id)}">
+        <input data-lib-rename-input value="${esc(recipe.name)}" aria-label="New name" />
+        <button type="submit">Rename</button>
+        <button type="button" data-lib-cancel="1">Cancel</button>
+      </form>`;
+    } else if (open && recipe.source === 'user') {
+      actions = `<div class="library-actions">
+        <button type="button" data-lib-rename="${esc(recipe.id)}">Rename</button>
+        <button type="button" data-lib-duplicate="${esc(recipe.id)}">Duplicate</button>
+        <button type="button" data-lib-export="${esc(recipe.id)}">Export</button>
+        <button type="button" data-lib-ask-delete="${esc(recipe.id)}">Delete</button>
+      </div>`;
+    } else if (open) {
+      actions = `<div class="library-actions">
+        <button type="button" data-lib-duplicate="${esc(recipe.id)}">Duplicate to My objects</button>
+      </div>`;
+    }
+    return `<li class="library-row${active ? ' is-active' : ''}" data-recipe-id="${esc(recipe.id)}"${active ? ' aria-current="true"' : ''}>
+      <div class="library-row-main">
+        <button type="button" class="library-load" data-recipe="${esc(recipe.id)}" aria-label="${esc(recipe.name)}">
+          <i class="ph ${esc(icon)}" aria-hidden="true"></i>
+          <span class="library-copy">
+            <span class="library-name">${esc(recipe.name)}</span>
+            <span class="library-blurb" title="${esc(blurb)}">${esc(blurb)}</span>
+          </span>
+        </button>
+        <span class="library-badge">${badge}</span>
+        <button type="button" class="library-more" data-lib-more="${esc(recipe.id)}" aria-expanded="${open ? 'true' : 'false'}" aria-label="Actions for ${esc(recipe.name)}">⋯</button>
+      </div>
+      ${actions}
+    </li>`;
+  }
+
+  function renderLibraryList(id, recipes, emptyText) {
+    const ul = $(id);
+    if (!ul) return;
+    if (!recipes.length && emptyText) {
+      ul.innerHTML = `<li class="library-empty">${emptyText}</li>`;
+      return;
+    }
+    ul.innerHTML = recipes.map(recipeRow).join('');
+  }
+
+  function renderLibrary() {
+    const recipes = listRecipes();
+    renderLibraryList('list-library-classic', recipes.filter((recipe) => recipe.meta?.group === 'classic'));
+    renderLibraryList('list-library-examples', recipes.filter((recipe) => recipe.meta?.group === 'example'));
+    renderLibraryList(
+      'list-library-user',
+      recipes.filter((recipe) => recipe.source === 'user'),
+      'Nothing saved yet. Build a scene, then press Save current.',
+    );
+    if (renameFor) document.querySelector('[data-lib-rename-input]')?.focus();
+  }
+
+  function closeSaveForm() {
+    $('library-save-form')?.classList.add('hidden');
+  }
+
+  function syncSaveForm() {
+    const input = $('input-library-name');
+    const confirm = $('btn-library-save-confirm');
+    const note = $('library-save-note');
+    if (!input || !confirm || !note) return;
+    const existing = userByName(input.value.trim());
+    confirm.textContent = existing ? 'Replace' : 'Save';
+    note.textContent = existing ? `Replaces the saved '${existing.name}'.` : '';
+    note.classList.toggle('hidden', !existing);
+  }
+
+  function openSaveForm() {
+    if (!sceneCanSave(ensureScene())) return;
+    const input = $('input-library-name');
+    const loaded = config.recipeId ? getRecipe(config.recipeId) : null;
+    if (input) input.value = loaded?.name || 'My object';
+    $('library-save-form')?.classList.remove('hidden');
+    syncSaveForm();
+    input?.focus();
+    input?.select();
+  }
+
+  function confirmSave() {
+    const name = $('input-library-name')?.value.trim();
+    if (!name) return;
+    if (!sceneCanSave(ensureScene())) {
+      setLibraryStatus('Add at least one support and one load first.', true);
+      return;
+    }
+    const existing = userByName(name);
+    const { nx, ny, nz } = dims();
+    try {
+      const saved = saveUserRecipe({
+        id: existing?.id,
+        name,
+        scene: ensureScene(),
+        meta: {
+          blurb: existing?.meta?.blurb,
+          icon: existing?.meta?.icon,
+          domain: { x: nx, y: ny, z: nz, budget: nx * ny * nz },
+          volfrac: config.volfrac,
+          rmin: config.rmin,
+        },
+      });
+      setLibraryStatus(`Saved '${saved.name}'.`);
+      closeSaveForm();
+      renderLibrary();
+    } catch (err) {
+      reportStoreError(err);
+    }
+  }
+
+  function duplicateRecipe(id) {
+    const recipe = getRecipe(id);
+    if (!recipe) return;
+    const name = copyName(recipe.name);
+    try {
+      saveUserRecipe({
+        name,
+        scene: recipe.scene,
+        meta: {
+          blurb: recipe.meta?.blurb,
+          icon: recipe.meta?.icon,
+          domain: recipe.meta?.domain,
+          volfrac: recipe.meta?.volfrac,
+          rmin: recipe.meta?.rmin,
+        },
+      });
+    } catch (err) {
+      reportStoreError(err);
+      return;
+    }
+    actionFor = null;
+    deleteFor = null;
+    renameFor = null;
+    setLibraryStatus(`Saved '${name}'.`);
+    renderLibrary();
+  }
+
+  function formatImport(result) {
+    if (!result.added && !result.skipped) return result.errors[0] || 'Nothing imported.';
+    const noun = result.added === 1 ? 'object' : 'objects';
+    let message = `Imported ${result.added} ${noun}.`;
+    if (result.skipped) {
+      const unknown = result.errors.some((err) => /unknown/i.test(err));
+      message += ` Skipped ${result.skipped} (${unknown ? 'unknown component type' : 'unreadable'}).`;
+    }
+    return message;
+  }
+
+  on($('fold-library'), 'click', (e) => {
+    const target = e.target instanceof Element ? e.target : e.target?.parentElement;
+    if (!target) return;
+    const more = target.closest('[data-lib-more]');
+    if (more) {
+      const id = more.dataset.libMore;
+      if (actionFor === id && deleteFor !== id && renameFor !== id) actionFor = null;
+      else actionFor = id;
+      deleteFor = null;
+      renameFor = null;
+      renderLibrary();
+      return;
+    }
+    if (target.closest('[data-lib-cancel]')) {
+      deleteFor = null;
+      renameFor = null;
+      renderLibrary();
+      return;
+    }
+    const ask = target.closest('[data-lib-ask-delete]');
+    if (ask) {
+      deleteFor = ask.dataset.libAskDelete;
+      renameFor = null;
+      renderLibrary();
+      return;
+    }
+    const rename = target.closest('[data-lib-rename]');
+    if (rename) {
+      renameFor = rename.dataset.libRename;
+      deleteFor = null;
+      renderLibrary();
+      return;
+    }
+    const del = target.closest('[data-lib-delete]');
+    if (del) {
+      const recipe = getRecipe(del.dataset.libDelete);
+      const removed = deleteUserRecipe(del.dataset.libDelete);
+      if (removed && config.recipeId === del.dataset.libDelete) config.recipeId = null;
+      actionFor = null;
+      deleteFor = null;
+      setLibraryStatus(removed ? `Deleted '${recipe?.name ?? 'object'}'.` : 'That object is already gone.', !removed);
+      renderLibrary();
+      highlightRecipe();
+      return;
+    }
+    const dup = target.closest('[data-lib-duplicate]');
+    if (dup) {
+      duplicateRecipe(dup.dataset.libDuplicate);
+      return;
+    }
+    const exp = target.closest('[data-lib-export]');
+    if (exp) {
+      const recipe = getRecipe(exp.dataset.libExport);
+      if (!recipe) return;
+      downloadJson(`topoopt-${fileSlug(recipe.name)}-${dateStamp()}.json`, exportRecipes([recipe.id]));
+      return;
+    }
+    const load = target.closest('[data-recipe]');
+    if (!load?.dataset.recipe || target.closest('.library-actions')) return;
+    const recipe = getRecipe(load.dataset.recipe);
+    onLoadRecipe?.(load.dataset.recipe);
+    if (recipe) setLibraryStatus(`Loaded '${recipe.name}'. Apply Scene to optimize.`);
+  });
+
+  on($('fold-library'), 'submit', (e) => {
+    const form = e.target.closest?.('[data-lib-rename-form]');
+    if (!form) return;
+    e.preventDefault();
+    const recipe = getRecipe(form.dataset.libRenameForm);
+    const name = form.querySelector('[data-lib-rename-input]')?.value.trim();
+    if (!recipe || !name) return;
+    try {
+      saveUserRecipe({ id: recipe.id, name, scene: recipe.scene, meta: recipe.meta });
+    } catch (err) {
+      reportStoreError(err);
+      return;
+    }
+    renameFor = null;
+    actionFor = null;
+    setLibraryStatus(`Renamed to '${name}'.`);
+    renderLibrary();
+  });
+
+  on($('library-save-form'), 'submit', (e) => {
+    e.preventDefault();
+    confirmSave();
+  });
+  on($('btn-library-save-cancel'), 'click', () => closeSaveForm());
+  on($('btn-library-save'), 'click', () => openSaveForm());
+  on($('input-library-name'), 'input', () => syncSaveForm());
+  on($('input-library-name'), 'keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    closeSaveForm();
+  });
+  on($('btn-library-export'), 'click', () => {
+    const users = listRecipes().filter((recipe) => recipe.source === 'user');
+    if (!users.length) {
+      setLibraryStatus('Nothing saved yet. Build a scene, then press Save current.', true);
+      return;
+    }
+    downloadJson(`topoopt-library-${dateStamp()}.json`, exportRecipes());
+    setLibraryStatus(`Exported ${users.length} ${users.length === 1 ? 'object' : 'objects'}.`);
+  });
+  on($('btn-library-import'), 'click', () => $('input-library-import')?.click());
+  on($('input-library-import'), 'change', async (e) => {
+    const input = /** @type {HTMLInputElement} */ (e.target);
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    let text = '';
+    try {
+      text = await file.text();
+    } catch {
+      setLibraryStatus('Could not read that file.', true);
+      return;
+    }
+    const result = importRecipes(text);
+    setLibraryStatus(formatImport(result), result.added === 0);
+    renderLibrary();
+  });
 
   function loadScene(scene) {
     pushUndo();
@@ -775,6 +1229,8 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     renderInspector();
     renderWorkingVolumeUI();
     renderWarnings();
+    highlightRecipe();
+    refreshSaveButton();
     onChange?.();
     onClear?.();
   }
@@ -820,6 +1276,12 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     const axisEl = $('wv-axis');
     if (axisEl && document.activeElement !== axisEl) {
       axisEl.value = wv.axis === 'x' || wv.axis === 'y' ? wv.axis : 'z';
+    }
+    const wvLabel = $('fold-wv-label');
+    if (wvLabel) {
+      const shapeName = shape === 'sphere' ? 'Sphere' : shape === 'cylinder' ? 'Cylinder' : 'Box';
+      const modeName = wv.mode === 'full' ? 'Full' : wv.mode === 'manual' ? 'Manual' : 'Auto';
+      wvLabel.textContent = `Working volume · ${shapeName} ${modeName}`;
     }
     const hint = $('wv-hint');
     if (hint) {
@@ -898,6 +1360,8 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     wv.shape = shape;
     if (shape === 'cylinder' && wv.axis !== 'x' && wv.axis !== 'y' && wv.axis !== 'z') wv.axis = 'z';
     if (wv.mode === 'auto') wv.bounds = computeAutoWorkingBounds(scene, wv.padding ?? 0.06, dims());
+    const fold = $('fold-wv');
+    if (fold) fold.open = true;
     notify(false);
   }
 
@@ -1095,7 +1559,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
       deleteSelected();
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey && !typing) {
       e.preventDefault();
       undo();
     }
@@ -1120,9 +1584,12 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
   on($('tab-scene'), 'click', () => showTab('scene'));
   on($('tab-stage'), 'click', () => showTab('stage'));
 
+  bindFolds();
+  renderLibrary();
   renderObjectList();
   renderWorkingVolumeUI();
   renderWarnings();
+  refreshSaveButton();
 
   return {
     showTab,
