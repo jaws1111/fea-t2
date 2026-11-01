@@ -320,7 +320,7 @@ console.log('\n[glyphs draw]');
     createComponent('pressure', { shape: 'cylinder', radius: 0.1, len: 0.4, x: 0.7 }),
   ]);
   const group = new THREE.Group();
-  updateBoundaryFixtures(group, { ...DIMS, preset: 'custom', scene });
+  updateBoundaryFixtures(group, { ...DIMS, scene });
   ok(group.children.length >= 7, `glyph group has a mesh per shape (${group.children.length})`);
 }
 

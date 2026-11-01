@@ -60,7 +60,7 @@ export class WorkerClient {
 
   /**
    * Re-initialise the solver. Deferred while a request is in flight.
-   * @param {{ nx: number, ny: number, nz: number, volfrac: number, penal: number, rmin: number, preset: string }} payload
+   * @param {{ nx: number, ny: number, nz: number, volfrac: number, penal: number, rmin: number, scene?: import('../scene/types.js').Scene | null }} payload
    */
   reset(payload) {
     if (!this.worker) return false;

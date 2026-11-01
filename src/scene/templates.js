@@ -6,7 +6,7 @@ import { linkFeatures } from './links.js';
  * radii are a fraction of max(nx, ny, nz). Each example lists the grid it was tuned for
  * (`resolution`) — loading it switches the grid so sizes and spans are what you see here.
  *
- * Modelling rules these presets follow (the solver enforces them):
+ * Modelling rules these examples follow (the solver enforces them):
  *  - A `bolt_hole` is ONE object: bore + locked boss + (optional) constraint + (optional)
  *    load. A clamped hole is fixed on all axes; a loaded hole leaves every axis its load
  *    acts along FREE (otherwise the support swallows the load — the editor warns).

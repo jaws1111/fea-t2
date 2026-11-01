@@ -1,7 +1,7 @@
 ﻿/**
  * Topology optimisation worker.
  *
- * Messages in:  INIT | RESET {nx,ny,nz,volfrac,penal,rmin,preset}
+ * Messages in:  INIT | RESET {nx,ny,nz,volfrac,penal,rmin,scene}
  *               STEP {batch}            fixed number of iterations, one reply
  *               RUN {runId}             iterate autonomously until PAUSE
  *               PAUSE {runId}           finish in-flight work, send final reply
@@ -133,7 +133,6 @@ async function runOneStep() {
           ny: state.ny,
           nz: state.nz,
           penal: state.penal,
-          preset: state.preset,
           scene: state.scene,
           xPhys: state.xPhys,
           globalU: state.globalU,

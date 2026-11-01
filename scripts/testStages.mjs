@@ -55,15 +55,15 @@ console.log('\n[warm start]');
 {
   const scene = normalizeScene(createTwoBoltBracketScene());
   const a = { nx: 36, ny: 15, nz: 8 };
-  const sA = createSolverState({ ...a, volfrac: 0.3, penal: 3, rmin: 1.6, preset: 'custom', scene });
+  const sA = createSolverState({ ...a, volfrac: 0.3, penal: 3, rmin: 1.6, scene });
   let r;
   for (let i = 0; i < 6; i++) r = stepSIMP(sA);
   const cA = r.compliance;
   const b = dimsForVoxelTarget(a, 24_000);
-  const sB = createSolverState({ ...b, volfrac: 0.3, penal: 3, rmin: 3, preset: 'custom', scene });
+  const sB = createSolverState({ ...b, volfrac: 0.3, penal: 3, rmin: 3, scene });
   // reuse path (worker RESET on existing state)
   resetSolverState(sB, {
-    ...b, volfrac: 0.3, penal: 3, rmin: 3, preset: 'custom', scene,
+    ...b, volfrac: 0.3, penal: 3, rmin: 3, scene,
     initDensity: { ...a, data: Float32Array.from(sA.xPhys), sharpen: 0.25 },
   });
   const mask = buildPassiveMask(b.nx, b.ny, b.nz, scene);
@@ -83,7 +83,7 @@ console.log('\n[warm start]');
   ok(Math.abs(sB.xPhys.reduce((s, v) => s + v, 0) / sB.xPhys.length - 0.3) < 0.15, 'volume fraction remains sane');
 
   // fresh start from uniform for comparison: warm start should begin with lower compliance
-  const sC = createSolverState({ ...b, volfrac: 0.3, penal: 3, rmin: 3, preset: 'custom', scene });
+  const sC = createSolverState({ ...b, volfrac: 0.3, penal: 3, rmin: 3, scene });
   const rc = stepSIMP(sC);
   ok(r0.compliance < rc.compliance, `warm start beats uniform start (${r0.compliance.toFixed(2)} < ${rc.compliance.toFixed(2)})`);
 }

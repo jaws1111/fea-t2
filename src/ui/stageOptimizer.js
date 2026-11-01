@@ -223,7 +223,7 @@ export function bindStageOptimizer({ config, workerClient, getDensities, setRunn
     }
   }
 
-  /** Called when something outside the stage tab resets the solver (preset / grid / Reset). */
+  /** Called when something outside the stage tab resets the solver (grid change or Reset). */
   function invalidate() {
     plan.auto = false;
     if (plan.current < 0 && !plan.results.length) return;
@@ -234,7 +234,7 @@ export function bindStageOptimizer({ config, workerClient, getDensities, setRunn
     plan.iterAccum = [];
     plan.hist = [];
     plan.live = null;
-    plan.note = 'Stage plan reset (grid, preset or solver was reset elsewhere).';
+    plan.note = 'Stage plan reset (grid or solver was reset elsewhere).';
     render();
   }
 

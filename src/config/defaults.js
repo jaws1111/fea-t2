@@ -1,5 +1,3 @@
-/** @typedef {'bridge'|'deck'|'cantilever'|'mbb'|'michell'} PresetKey */
-
 /**
  * Resolution presets matching the studio UI selector.
  * @type {Record<string, { nx: number, ny: number, nz: number, label?: string }>}
@@ -40,7 +38,7 @@ export const FEA_CONSTANTS = {
  *   nx: number, ny: number, nz: number,
  *   volfrac: number, penal: number, rmin: number,
  *   cutoff: number, defScale: number, batchSize: number,
- *   preset: PresetKey, viewMode: 'cubes'|'smooth', colorMode: 'density'|'viridis'|'metal'|'energy'
+ *   viewMode: 'cubes'|'smooth', colorMode: 'density'|'viridis'|'metal'|'energy'
  * }>} [overrides]
  */
 export function createConfig(overrides = {}) {
@@ -55,7 +53,6 @@ export function createConfig(overrides = {}) {
     cutoff: 0.18,
     defScale: 0.0,
     batchSize: 1,
-    preset: 'bridge',
     /** Library recipe currently shown, or null after the first edit. */
     recipeId: null,
     /** Level 1: how the design is drawn. */

@@ -10,8 +10,7 @@ import { seedDensity } from './resample.js';
  * @property {number} volfrac
  * @property {number} penal
  * @property {number} rmin
- * @property {string} preset
- * @property {import('../scene/types.js').Scene | null} scene  custom scene (preset === 'custom')
+ * @property {import('../scene/types.js').Scene | null} scene
  * @property {Float32Array} x
  * @property {Float32Array} xPhys
  * @property {Float32Array} elementEnergies
@@ -26,7 +25,6 @@ import { seedDensity } from './resample.js';
  * @param {{
  *   nx: number, ny: number, nz: number,
  *   volfrac: number, penal: number, rmin: number,
- *   preset: string,
  *   scene?: import('../scene/types.js').Scene | null,
  *   KE?: Float32Array,
  * }} params
@@ -40,7 +38,6 @@ export function createSolverState(params) {
     volfrac,
     penal,
     rmin,
-    preset,
     scene = null,
     KE = KE_24x24,
   } = params;
@@ -56,7 +53,7 @@ export function createSolverState(params) {
     elementEnergies[i] = 1.0;
   }
   seedDensity(x, xPhys, nx, ny, nz, params.initDensity);
-  if (preset === 'custom') applyPassiveRegions(x, xPhys, nx, ny, nz, scene);
+  if (scene) applyPassiveRegions(x, xPhys, nx, ny, nz, scene);
 
   return {
     nx,
@@ -65,7 +62,6 @@ export function createSolverState(params) {
     volfrac,
     penal,
     rmin,
-    preset,
     scene,
     x,
     xPhys,
@@ -85,7 +81,6 @@ export function createSolverState(params) {
  * @param {{
  *   nx: number, ny: number, nz: number,
  *   volfrac: number, penal: number, rmin: number,
- *   preset: string,
  *   scene?: import('../scene/types.js').Scene | null,
  * }} params
  * @returns {SolverState}
@@ -98,7 +93,6 @@ export function resetSolverState(state, params) {
     volfrac,
     penal,
     rmin,
-    preset,
     scene = null,
   } = params;
 
@@ -108,7 +102,6 @@ export function resetSolverState(state, params) {
   state.volfrac = volfrac;
   state.penal = penal;
   state.rmin = rmin;
-  state.preset = preset;
   state.scene = scene;
   state.iteration = 0;
 
@@ -127,7 +120,7 @@ export function resetSolverState(state, params) {
   }
   // Warm start from a coarser/finer previous result (Stage Optimizer).
   seedDensity(state.x, state.xPhys, nx, ny, nz, params.initDensity);
-  if (preset === 'custom') applyPassiveRegions(state.x, state.xPhys, nx, ny, nz, scene);
+  if (scene) applyPassiveRegions(state.x, state.xPhys, nx, ny, nz, scene);
 
   state.globalU = null;
   state.caseU = null; // per-load-case warm starts (see loadCases.js)

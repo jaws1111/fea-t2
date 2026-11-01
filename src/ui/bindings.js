@@ -106,18 +106,9 @@ export function bindAll({
       volfrac: config.volfrac,
       penal: config.penal,
       rmin: config.rmin,
-      preset: config.preset,
-      // Always hand the worker a current-schema scene (migrates legacy saves).
+      // Saved scenes from older builds still need the current schema.
       scene: config.scene ? normalizeScene(config.scene) : null,
     };
-  }
-
-  /**
-   * Config used to draw supports / loads: while the Scene tab is open (or the preset is custom)
-   * the draft scene is shown — never the glyphs of whichever preset happens to be selected.
-   */
-  function fixtureConfig() {
-    return config.preset === 'custom' || sceneEditorActive() ? { ...config, preset: 'custom', scene: config.scene } : config;
   }
 
   /** Stop, clear telemetry history, rebuild fixtures and re-initialise the worker. */
@@ -127,7 +118,7 @@ export function bindAll({
     if (!fromStage) stageApi?.invalidate();
     if (clearMetrics) metrics?.clear();
     workerClient.reset(resetPayload(init));
-    if (sceneApi.fixturesGroup) updateBoundaryFixtures(sceneApi.fixturesGroup, fixtureConfig());
+    if (sceneApi.fixturesGroup) updateBoundaryFixtures(sceneApi.fixturesGroup, config);
     sceneApi.invalidateShadows?.();
     onSceneChange?.();
   }
@@ -253,7 +244,6 @@ export function bindAll({
     config.ny = resolved.dims.ny;
     config.nz = resolved.dims.nz;
     config.resKey = key;
-    config.preset = 'custom';
     if (Number.isFinite(resolved.volfrac)) {
       config.volfrac = resolved.volfrac;
       const volInput = $('input-volfrac');
@@ -280,7 +270,6 @@ export function bindAll({
       const recipe = $(id)?.dataset.recipe || null;
       if (!recipe) {
         config.recipeId = null;
-        config.preset = 'custom';
         if (isSceneEmpty(config.scene)) {
           const fallback = getRecipe('builtin:two_bolt_bracket');
           if (fallback) sceneEditor.loadScene(fallback.scene);
@@ -377,7 +366,7 @@ export function bindAll({
       config.ny = d.ny;
       config.nz = d.nz;
       config.resKey = e.target.value;
-    } else if (config.preset === 'custom' && hasScene()) {
+    } else if (hasScene()) {
       applyGridBudget(budget, e.target.value);
     } else {
       const d = fitDimsForBudget({ x: config.nx, y: config.ny, z: config.nz }, budget);
@@ -428,51 +417,28 @@ export function bindAll({
       stageApi?.invalidate();
     },
     onApply: () => {
-      config.preset = 'custom';
       renderPresetButtons();
       resetSimulation();
     },
     onChange: () => {
       renderPresetButtons();
-      // Always preview fixtures from the draft scene while editing / when custom.
       if (sceneApi.fixturesGroup) {
-        updateBoundaryFixtures(sceneApi.fixturesGroup, fixtureConfig());
+        updateBoundaryFixtures(sceneApi.fixturesGroup, config);
         sceneApi.invalidateShadows?.();
       }
       onSceneChange?.();
     },
     onClear: () => {
-      // Drop applied custom BCs and wipe the density field so Clear is visible.
-      if (config.preset === 'custom') {
-        config.preset = 'custom';
-        resetSimulation();
-      } else if (sceneApi.fixturesGroup) {
-        updateBoundaryFixtures(sceneApi.fixturesGroup, {
-          ...config,
-          preset: 'custom',
-          scene: config.scene,
-        });
-        sceneApi.invalidateShadows?.();
-      }
-      onSceneChange?.();
+      resetSimulation();
     },
     onTabChange: (name) => {
       onTabChange?.(name);
-      // Refresh fixture preview when entering the scene tab.
       if (name === 'scene' && sceneApi.fixturesGroup) {
-        updateBoundaryFixtures(sceneApi.fixturesGroup, {
-          ...config,
-          preset: 'custom',
-          scene: config.scene,
-        });
+        updateBoundaryFixtures(sceneApi.fixturesGroup, config);
       }
     },
     onSelect: onSceneSelect,
   });
-
-  function sceneEditorActive() {
-    return !$('panel-scene')?.classList.contains('hidden');
-  }
 
   /** Switch grid (and optionally warm-start) for the Stage Optimizer. */
   function applyStage(dims, { init = null, rmin, clearMetrics = true } = {}) {

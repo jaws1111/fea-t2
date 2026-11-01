@@ -282,7 +282,7 @@ for (const ex of SCENE_EXAMPLES) {
   }
 
   const state = createSolverState({
-    nx, ny, nz, volfrac: ex.volfrac ?? 0.3, penal: 3, rmin: 1.5, preset: 'custom', scene,
+    nx, ny, nz, volfrac: ex.volfrac ?? 0.3, penal: 3, rmin: 1.5, scene,
   });
   let last;
   for (let i = 0; i < 4; i++) last = stepSIMP(state);

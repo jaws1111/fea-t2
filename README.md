@@ -24,8 +24,28 @@ npm run preview  # serve dist/
 | `src/solver` | CPU + WebGPU backends; auto-picks fastest for grid size |
 | `src/worker` | Module worker — transferable density / energy / disp buffers |
 | `src/viz` | Three.js instanced voxels, colormaps, BC glyphs |
+| `src/scene` | Scene document, components, supports, and loads |
+| `src/library` | Built-in recipes and objects saved in the browser |
 | `src/perf` | Metrics ring buffers + uPlot live charts |
 | `doc/` | Original monolithic HTML reference (unchanged) |
+
+## Object library
+
+A problem in this studio is a recipe. A recipe is a scene document. Built-in recipes ship with the app. Recipes you save stay in `localStorage` under `topoopt.library.v1`. **Import** reads a JSON file into that list. **Export all** writes the list out.
+
+`recipeId` on the studio config is the id of the recipe on screen. An edit clears it. Loading a recipe sets it again. The Optimize buttons load these ids.
+
+| Button | Recipe |
+| --- | --- |
+| Bridge Arch | `builtin:bridge` |
+| Deck Bridge | `builtin:deck` |
+| Cantilever | `builtin:cantilever` |
+| MBB Beam | `builtin:mbb` |
+| Michell Wheel | `builtin:michell` |
+
+**Custom Scene** clears `recipeId` and opens the Scene tab. An empty scene gets the two-bolt bracket as a starting point, and `recipeId` stays empty.
+
+Worker `RESET` sends the grid, the SIMP settings, and the scene. Supports, loads, passive cells, and load cases come from that scene.
 
 ## Backends
 
