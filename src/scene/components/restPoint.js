@@ -22,6 +22,7 @@ export const restPoint = {
       fixX: true,
       fixY: true,
       fixZ: true,
+      solid: true,
     };
     return { ...base, ...stripUndefined(partial), type: 'rest_point' };
   },
@@ -42,6 +43,7 @@ export const restPoint = {
   },
 
   paintSolid(c, ctx) {
+    if (c.solid === false) return;
     const { nx, ny, nz } = ctx.dims;
     const cpt = normToNodeIndices(nx, ny, nz, c.x, c.y, c.z);
     const R = Math.max(1.5, (c.radius ?? 0.03) * ctx.maxDim * 1.5);

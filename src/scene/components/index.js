@@ -1,15 +1,21 @@
 import { boltHole } from './boltHole.js';
+import { faceLoad } from './faceLoad.js';
+import { lineLoad } from './lineLoad.js';
 import { pointLoad } from './pointLoad.js';
 import { pressure } from './pressure.js';
+import { restLine } from './restLine.js';
 import { restPoint } from './restPoint.js';
 import { wallPad } from './wallPad.js';
 
 /** @type {Readonly<Record<string, import('./restPoint.js').restPoint>>} */
 export const COMPONENTS = Object.freeze({
   rest_point: restPoint,
+  rest_line: restLine,
   bolt_hole: boltHole,
   wall_pad: wallPad,
   point_load: pointLoad,
+  line_load: lineLoad,
+  face_load: faceLoad,
   pressure,
 });
 
