@@ -7,15 +7,7 @@
  * radius is a fraction of max(nx, ny, nz), not of each axis.
  */
 
-import {
-  holeBossOuterCells,
-  holeRadiusCells,
-  holeSpan,
-  perpAxes,
-  pressureExtentCells,
-  validAxis,
-} from './geometry.js';
-import { pointLoadAxes, pointLoadMode, pointSpreadCells } from './pointLoad.js';
+import { componentDef, orderedFeatures } from './components/index.js';
 
 /** @typedef {'full'|'auto'|'manual'} WorkingVolumeMode */
 
@@ -81,8 +73,6 @@ function addBox(b, dims, cx, cy, cz, hxC0, hyC0, hzC0, grows = false) {
   b.z1 = Math.max(b.z1, cz + hzC / dims.nz);
 }
 
-const num = (v, d) => (Number.isFinite(v) ? v : d);
-
 /**
  * Fit an AABB around every scene feature, incl. bolt bosses, pressure cavities
  * + walls, wall pads, rests and point loads.
@@ -95,74 +85,17 @@ const num = (v, d) => (Number.isFinite(v) ? v : d);
  * @returns {WorkingBounds}
  */
 export function computeAutoWorkingBounds(scene, padding = 0.06, dims = DEFAULT_DIMS, opts = {}) {
-  const feats = [...(scene?.fixations ?? []), ...(scene?.forces ?? [])];
+  const feats = orderedFeatures(scene).filter(Boolean);
   if (!feats.length) return { ...FULL };
 
-  const maxDim = Math.max(dims.nx, dims.ny, dims.nz);
-  const nOf = { x: dims.nx, y: dims.ny, z: dims.nz };
   const b = newBounds();
   let any = false;
 
   for (const f of feats) {
-    if (!f) continue;
-    const x = num(f.x, 0.5);
-    const y = num(f.y, 0.5);
-    const z = num(f.z, 0.5);
-
-    if (f.type === 'wall_pad') {
-      any = true;
-      const face = ['x-', 'x+', 'y-', 'y+', 'z-', 'z+'].includes(f.face) ? f.face : 'x-';
-      const axis = face[0];
-      const [pa, pb] = perpAxes(axis);
-      const c = { x, y, z };
-      const halfU = (Math.max(0.05, num(f.width, 1)) / 2) * nOf[pa];
-      const halfV = (Math.max(0.05, num(f.height, 1)) / 2) * nOf[pb];
-      const layers = Math.max(2, Math.round(num(f.depth, 1))) + 1;
-      const half = { x: 0, y: 0, z: 0 };
-      half[pa] = halfU;
-      half[pb] = halfV;
-      // Pad sits on its face and reaches `layers` cells into the domain.
-      const faceN = face[1] === '+' ? 1 : 0;
-      const into = face[1] === '+' ? -layers / 2 : layers / 2;
-      const cen = { x: c.x, y: c.y, z: c.z };
-      cen[axis] = faceN + into / nOf[axis];
-      half[axis] = layers / 2;
-      addBox(b, dims, cen.x, cen.y, cen.z, half.x, half.y, half.z);
-      continue;
-    }
-
-    if (f.type === 'bolt_hole') {
-      any = true;
-      const axis = validAxis(f.axis);
-      const Rs = holeBossOuterCells(holeRadiusCells(f.radius, maxDim));
-      const half = { x: Rs, y: Rs, z: Rs };
-      const [lo, hi] = holeSpan(f);
-      const cen = { x, y, z };
-      cen[axis] = (lo + hi) / 2;
-      half[axis] = ((hi - lo) / 2) * nOf[axis];
-      addBox(b, dims, cen.x, cen.y, cen.z, half.x, half.y, half.z);
-      continue;
-    }
-
-    if (f.type === 'pressure') {
-      any = true;
-      const e = pressureExtentCells(f, dims);
-      addBox(b, dims, x, y, z, e.hx, e.hy, e.hz, true);
-      continue;
-    }
-
-    if (f.type === 'rest_point') {
-      any = true;
-      const r = Math.max(1.5, num(f.radius, 0.03) * maxDim * 1.5) + 1;
-      addBox(b, dims, x, y, z, r, r, r);
-      continue;
-    }
-
-    // point_load and anything else: a few cells around the application point.
+    const box = componentDef(f.type)?.extent?.(f, dims);
+    if (!box) continue;
     any = true;
-    const burst = f.type === 'point_load' && pointLoadAxes(f) > 1 && pointLoadMode(f) === 'burst';
-    const reach = burst ? pointSpreadCells(f, maxDim) + 1.5 : 2.5;
-    addBox(b, dims, x, y, z, reach, reach, reach);
+    addBox(b, dims, box.cx, box.cy, box.cz, box.hx, box.hy, box.hz, !!box.grows);
   }
 
   if (!any) return { ...FULL };
@@ -196,10 +129,11 @@ export function computeAutoWorkingBounds(scene, padding = 0.06, dims = DEFAULT_D
  */
 export function pressureOverflowCells(scene, dims = DEFAULT_DIMS) {
   const b = newBounds();
-  for (const f of scene?.forces ?? []) {
-    if (f?.type !== 'pressure') continue;
-    const e = pressureExtentCells(f, dims);
-    addBox(b, dims, num(f.x, 0.5), num(f.y, 0.5), num(f.z, 0.5), e.hx, e.hy, e.hz, true);
+  for (const f of orderedFeatures(scene)) {
+    if (!f) continue;
+    const box = componentDef(f.type)?.extent?.(f, dims);
+    if (!box?.grows) continue;
+    addBox(b, dims, box.cx, box.cy, box.cz, box.hx, box.hy, box.hz, true);
   }
   const r = b.raw;
   const o = {
