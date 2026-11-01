@@ -49,11 +49,13 @@ export function createDesignVolume(scene) {
  *
  * @param {{ group: THREE.Group }} api
  * @param {{ nx: number, ny: number, nz: number, scene?: import('../scene/types.js').Scene | null }} dims
+ * @param {{ x0: number, x1: number, y0: number, y1: number, z0: number, z1: number } | null} [boundsOverride]
+ *   box to draw instead (may extend past the domain, e.g. while dragging a corner)
  */
-export function updateDesignVolume(api, dims) {
+export function updateDesignVolume(api, dims, boundsOverride = null) {
   if (!api?.group || !dims) return;
   const { nx, ny, nz } = dims;
-  const b = resolveWorkingBounds(dims.scene ?? null, { nx, ny, nz });
+  const b = boundsOverride ?? resolveWorkingBounds(dims.scene ?? null, { nx, ny, nz });
   const sx = Math.max(0.05, (b.x1 - b.x0) * nx);
   const sy = Math.max(0.05, (b.y1 - b.y0) * ny);
   const sz = Math.max(0.05, (b.z1 - b.z0) * nz);

@@ -243,7 +243,16 @@ export function updateBoundaryFixtures(group, config) {
         break;
       case 'load': {
         if (f.dir) {
-          addDirArrow(p.x, p.y, p.z, f.dir, arrowMat, f.scale ?? 1);
+          const lead = f.lead ?? 0;
+          const dl = Math.hypot(f.dir.x, f.dir.y, f.dir.z) || 1;
+          addDirArrow(
+            p.x + (f.dir.x / dl) * lead,
+            p.y + (f.dir.y / dl) * lead,
+            p.z + (f.dir.z / dl) * lead,
+            f.dir,
+            arrowMat,
+            f.scale ?? 1,
+          );
           break;
         }
         const arrow = new THREE.Group();

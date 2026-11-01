@@ -19,6 +19,7 @@ import {
   forNodesOnSphereShell,
   normToNodeIndices,
 } from './tools.js';
+import { pointLoadComponents, sceneLoadCaseCount } from './pointLoad.js';
 import { resolveWorkingBounds } from './workingVolume.js';
 
 const DEFAULT_REST_RADIUS = 0.02;
@@ -88,17 +89,27 @@ export function analyzeScene(scene, dims) {
   const nNodes = (nx + 1) * (ny + 1) * (nz + 1);
   const fixed = new Uint8Array(3 * nNodes);
   const F = new Float32Array(3 * nNodes);
-  const res = applyCustomBCs(fixed, F, nx, ny, nz, scene);
-  const warnings = [...res.warnings];
+  /** @type {string[]} */
+  const warnings = [];
+  let res = { fixedNodes: 0, loadedNodes: 0, warnings };
   let total = 0;
   let absorbedAbs = 0;
   const net = [0, 0, 0];
-  for (let i = 0; i < F.length; i++) {
-    const a = Math.abs(F[i]);
-    if (!a) continue;
-    total += a;
-    if (fixed[i]) absorbedAbs += a;
-    else net[i % 3] += F[i];
+  // Every load case is analysed on its own (a scene without multi-axis loads has one).
+  const cases = sceneLoadCaseCount(scene);
+  for (let k = 0; k < cases; k++) {
+    fixed.fill(0);
+    F.fill(0);
+    const r = applyCustomBCs(fixed, F, nx, ny, nz, scene, k);
+    for (const w of r.warnings) if (!warnings.includes(w)) warnings.push(w);
+    res = { fixedNodes: r.fixedNodes, loadedNodes: Math.max(res.loadedNodes, r.loadedNodes), warnings };
+    for (let i = 0; i < F.length; i++) {
+      const a = Math.abs(F[i]);
+      if (!a) continue;
+      total += a;
+      if (fixed[i]) absorbedAbs += a;
+      else if (k === 0) net[i % 3] += F[i];
+    }
   }
   if (!res.fixedNodes) warnings.push('No supports: add a wall pad, rest point or clamped bolt hole.');
   if (!res.loadedNodes) warnings.push('No loads: add a point load, loaded bolt hole or pressure.');
@@ -124,9 +135,10 @@ export function analyzeScene(scene, dims) {
  *
  * @param {Uint8Array} fixedDofs  length 3 * nNodes
  * @param {Float32Array} F        length 3 * nNodes
+ * @param {number} [loadCase]     which load case's multi-axis point loads to apply (see pointLoad.js)
  * @returns {{ fixedNodes: number, loadedNodes: number, warnings: string[] }}
  */
-export function applyCustomBCs(fixedDofs, F, nx, ny, nz, scene) {
+export function applyCustomBCs(fixedDofs, F, nx, ny, nz, scene, loadCase = 0) {
   let fixedNodes = 0;
   let loadedNodes = 0;
   /** @type {string[]} */
@@ -279,11 +291,18 @@ export function applyCustomBCs(fixedDofs, F, nx, ny, nz, scene) {
     switch (f.type) {
       case 'point_load': {
         const c = normToNodeIndices(nx, ny, nz, f.x, f.y, f.z);
-        const n = idx(c.ix, c.iy, c.iz);
-        F[3 * n] += dir[0] * absMag;
-        F[3 * n + 1] += dir[1] * absMag;
-        F[3 * n + 2] += dir[2] * absMag;
-        loadedNodes++;
+        // 1 axis: the classic single vector at the node. 2-6 axes: a burst, one force per axis
+        // direction on the node `spread` cells out along it (see pointLoad.js).
+        for (const comp of pointLoadComponents(f, maxDim, loadCase)) {
+          const ix = Math.max(0, Math.min(nx, c.ix + comp.off[0]));
+          const iy = Math.max(0, Math.min(ny, c.iy + comp.off[1]));
+          const iz = Math.max(0, Math.min(nz, c.iz + comp.off[2]));
+          const n = idx(ix, iy, iz);
+          F[3 * n] += comp.dir[0] * comp.mag;
+          F[3 * n + 1] += comp.dir[1] * comp.mag;
+          F[3 * n + 2] += comp.dir[2] * comp.mag;
+          loadedNodes++;
+        }
         break;
       }
 

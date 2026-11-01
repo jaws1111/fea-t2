@@ -130,6 +130,7 @@ export function resetSolverState(state, params) {
   if (preset === 'custom') applyPassiveRegions(state.x, state.xPhys, nx, ny, nz, scene);
 
   state.globalU = null;
+  state.caseU = null; // per-load-case warm starts (see loadCases.js)
   state.dispY = null;
   state.xVersion = (state.xVersion | 0) + 1; // tells the GPU backend to re-upload densities
   if (!state.KE) state.KE = KE_24x24;

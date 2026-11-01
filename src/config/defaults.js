@@ -40,7 +40,7 @@ export const FEA_CONSTANTS = {
  *   nx: number, ny: number, nz: number,
  *   volfrac: number, penal: number, rmin: number,
  *   cutoff: number, defScale: number, batchSize: number,
- *   preset: PresetKey, viewMode: string
+ *   preset: PresetKey, viewMode: 'cubes'|'smooth', colorMode: 'density'|'viridis'|'metal'|'energy'
  * }>} [overrides]
  */
 export function createConfig(overrides = {}) {
@@ -56,7 +56,14 @@ export function createConfig(overrides = {}) {
     defScale: 0.0,
     batchSize: 1,
     preset: 'bridge',
-    viewMode: 'density',
+    /** Level 1: how the design is drawn. */
+    viewMode: 'cubes',
+    /** Level 2: what the colour shows (applies to both representations). */
+    colorMode: 'density',
+    /** Ambient occlusion (voxel AO on cubes, baked vertex AO on the smooth body). */
+    ao: true,
+    /** Voxel preset the current custom-scene grid was fitted from (null = grid is as listed). */
+    resKey: null,
     /** @type {import('../scene/types.js').Scene | null} */
     scene: null,
     // Lower iso + fewer Taubin iters keep thin members from tearing open.

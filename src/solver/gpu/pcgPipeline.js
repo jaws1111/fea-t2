@@ -25,19 +25,26 @@ const OC_BISECT_STEPS = 32;
 /** GPU path: run fixed iterations (no early exit) so the device stays saturated. */
 const GPU_FIXED_ITERS = 80;
 
+/**
+ * SIMP iterations that may be queued on the device at once. Each iteration is hundreds of tiny
+ * dependent dispatches, so the GPU idles whenever the queue runs dry while the CPU round-trips
+ * a readback; a deeper queue keeps it fed (also across the renderer ↔ GPU-process latency).
+ */
+export const MAX_IN_FLIGHT = 4;
+
 const ENTRY_POINTS = [
   'spmv_gather',
   'build_invdiag',
   'jacobi_apply',
-  'saxpy',
-  'saxpy_neg',
   'xpay',
   'scale_copy',
   'residual_init',
   'reduce_dot',
   'final_reduce',
-  'pcg_set_alpha',
-  'pcg_set_beta',
+  'spmv_dot',
+  'final_alpha',
+  'update_urz',
+  'final_beta',
   'pcg_seed_alpha_one',
   'element_energy',
 ];
@@ -247,14 +254,16 @@ export class GpuPcgSolver {
       pRZnew: mk(PARAMS_BYTES, UNI),
       pSimp: mk(PARAMS_BYTES, UNI),
     };
-    // Two staging sets: ticket k+1 can be in flight while ticket k is being read.
-    for (let s = 0; s < 2; s++) {
-      buf[`stgX${s}`] = mk(nElements * 4, MAP);
-      buf[`stgE${s}`] = mk(nElements * 4, MAP);
-      buf[`stgD${s}`] = mk(nElements * 4, MAP);
+    // Per-ticket scalars only (compliance / volume / residual): up to MAX_IN_FLIGHT tickets can be
+    // queued while earlier ones are read. The big arrays (densities, energies, displacements)
+    // are NOT read back per iteration — `simpMirror` fetches them on demand (once per UI frame).
+    for (let s = 0; s < MAX_IN_FLIGHT; s++) {
       buf[`stgOc${s}`] = mk(OC_COUNT * 4, MAP);
       buf[`stgSc${s}`] = mk(SCALARS_COUNT * 4, MAP);
     }
+    buf.stgMX = mk(nElements * 4, MAP);
+    buf.stgME = mk(nElements * 4, MAP);
+    buf.stgMD = mk(nElements * 4, MAP);
 
     const KEB = this._keBuf;
     const e = (binding, buffer) => ({ binding, resource: { buffer } });
@@ -269,21 +278,22 @@ export class GpuPcgSolver {
     this._bg = {
       invDiag: group('build_invdiag', [e(0, P), e(1, KEB), e(2, buf.xPhys), e(3, buf.fixed), e(4, buf.invDiag)]),
       spmvU: group('spmv_gather', [e(0, P), e(1, KEB), e(2, buf.xPhys), e(3, buf.fixed), e(5, buf.U), e(6, buf.Ap)]),
-      spmvP: group('spmv_gather', [e(0, P), e(1, KEB), e(2, buf.xPhys), e(3, buf.fixed), e(5, buf.p), e(6, buf.Ap)]),
+      // Fused iteration kernels: Ap = K p + p·Ap partials | alpha | u,r,z update + r·z partials | beta.
+      spmvDotP: group('spmv_dot', [
+        e(0, P), e(1, KEB), e(2, buf.xPhys), e(3, buf.fixed), e(5, buf.p), e(6, buf.Ap), e(8, buf.partials),
+      ]),
+      finalAlpha: group('final_alpha', [e(0, P), e(8, buf.partials), e(9, buf.scalars)]),
+      updateURZ: group('update_urz', [
+        e(0, P), e(4, buf.invDiag), e(5, buf.p), e(6, buf.U), e(7, buf.r), e(8, buf.partials),
+        e(9, buf.scalars), e(10, buf.Ap), e(11, buf.z),
+      ]),
+      finalBeta: group('final_beta', [e(0, P), e(8, buf.partials), e(9, buf.scalars)]),
       residual: group('residual_init', [e(0, P), e(3, buf.fixed), e(5, buf.F), e(6, buf.Ap), e(7, buf.r)]),
       jacobi: group('jacobi_apply', [e(0, P), e(3, buf.fixed), e(4, buf.invDiag), e(5, buf.r), e(6, buf.z)]),
       copyZP: group('scale_copy', withS([e(0, P), e(5, buf.z), e(6, buf.p)])),
       xpay: group('xpay', withS([e(0, P), e(5, buf.z), e(6, buf.p)])),
-      saxpyU: group('saxpy', withS([e(0, P), e(5, buf.p), e(6, buf.U)])),
-      saxpyNegR: group('saxpy_neg', withS([e(0, P), e(5, buf.Ap), e(6, buf.r)])),
       dotRZ: group('reduce_dot', [e(0, buf.pRZ), e(5, buf.r), e(6, buf.z), e(8, buf.partials)]),
-      dotPAp: group('reduce_dot', [e(0, buf.pPAP), e(5, buf.p), e(6, buf.Ap), e(8, buf.partials)]),
-      dotRZnew: group('reduce_dot', [e(0, buf.pRZnew), e(5, buf.r), e(6, buf.z), e(8, buf.partials)]),
       finalRZ: group('final_reduce', [e(0, buf.pRZ), e(8, buf.partials), e(9, buf.scalars)]),
-      finalPAP: group('final_reduce', [e(0, buf.pPAP), e(8, buf.partials), e(9, buf.scalars)]),
-      finalRZnew: group('final_reduce', [e(0, buf.pRZnew), e(8, buf.partials), e(9, buf.scalars)]),
-      setAlpha: group('pcg_set_alpha', [e(9, buf.scalars)]),
-      setBeta: group('pcg_set_beta', [e(9, buf.scalars)]),
       seedAlpha: group('pcg_seed_alpha_one', [e(9, buf.scalars)]),
       energy: group('element_energy', [
         e(0, P), e(1, KEB), e(2, buf.xPhys), e(3, buf.fixed), e(5, buf.U), e(6, buf.energy), e(7, buf.dc),
@@ -357,7 +367,7 @@ export class GpuPcgSolver {
     this.queue.writeBuffer(this._buf.pSimp, 0, v.buffer.slice(0));
   }
 
-  _ensureConstants({ nx, ny, nz, preset, scene = null, KE }) {
+  _ensureConstants({ nx, ny, nz, preset, scene = null, KE, loadCase = 0 }) {
     if (KE.length !== 576) throw new Error('KE must be a 24x24 Float32Array');
     if (this._keRef !== KE) {
       this.queue.writeBuffer(this._keBuf, 0, KE instanceof Float32Array ? KE : new Float32Array(KE));
@@ -365,12 +375,13 @@ export class GpuPcgSolver {
     }
 
     const sceneKey = preset === 'custom' ? `:${JSON.stringify(scene)}` : '';
-    const key = `${nx}x${ny}x${nz}:${preset}${sceneKey}`;
+    const baseKey = `${nx}x${ny}x${nz}:${preset}${sceneKey}`;
+    const key = `${baseKey}#${loadCase}`;
     if (this._bcKey === key) return;
     const nDofs = this._nDofs;
     const fixedDofs = new Uint8Array(nDofs);
     const F = new Float32Array(nDofs);
-    applyBCs(fixedDofs, F, nx, ny, nz, preset, scene);
+    applyBCs(fixedDofs, F, nx, ny, nz, preset, scene, loadCase);
     const mask = new Uint32Array(nDofs);
     for (let i = 0; i < nDofs; i++) mask[i] = fixedDofs[i];
     this.queue.writeBuffer(this._buf.fixed, 0, mask);
@@ -379,7 +390,10 @@ export class GpuPcgSolver {
     this._bcKey = key;
     this._uDirty = true;
 
-    // Passive (void / locked-solid) mask is a pure function of the scene: build once.
+    // Passive (void / locked-solid) mask is a pure function of the scene (not of the load
+    // case): build once per scene.
+    if (this._passiveKey === baseKey) return;
+    this._passiveKey = baseKey;
     const nElements = this._nElements;
     const pass = new Uint32Array(nElements);
     let any = false;
@@ -419,21 +433,16 @@ export class GpuPcgSolver {
       pass.end();
     }
 
+    // One compute pass for the whole loop (WebGPU orders dependent dispatches in a pass).
+    const loop = enc.beginComputePass();
     for (let it = 0; it < iters; it++) {
-      const pass = enc.beginComputePass();
-      if (it > 0) this._dispatch(pass, 'xpay', bg.xpay);
-      this._dispatch(pass, 'spmv_gather', bg.spmvP);
-      this._dispatch(pass, 'reduce_dot', bg.dotPAp);
-      this._dispatch(pass, 'final_reduce', bg.finalPAP, 1);
-      this._dispatch(pass, 'pcg_set_alpha', bg.setAlpha, 1);
-      this._dispatch(pass, 'saxpy', bg.saxpyU);
-      this._dispatch(pass, 'saxpy_neg', bg.saxpyNegR);
-      this._dispatch(pass, 'jacobi_apply', bg.jacobi);
-      this._dispatch(pass, 'reduce_dot', bg.dotRZnew);
-      this._dispatch(pass, 'final_reduce', bg.finalRZnew, 1);
-      this._dispatch(pass, 'pcg_set_beta', bg.setBeta, 1);
-      pass.end();
+      if (it > 0) this._dispatch(loop, 'xpay', bg.xpay);
+      this._dispatch(loop, 'spmv_dot', bg.spmvDotP); //            Ap = K p, partial p·Ap
+      this._dispatch(loop, 'final_alpha', bg.finalAlpha, 1); //   pAp, alpha
+      this._dispatch(loop, 'update_urz', bg.updateURZ); //        u, r, z, partial r·z
+      this._dispatch(loop, 'final_beta', bg.finalBeta, 1); //     rzNew, beta
     }
+    loop.end();
 
     const pass = enc.beginComputePass();
     this._dispatch(pass, 'element_energy', bg.energy, this._nElemWG);
@@ -509,16 +518,12 @@ export class GpuPcgSolver {
     this._writeSimpParams({ rmin: state.rmin, volfrac: state.volfrac });
 
     const { device, queue, _buf: buf } = this;
-    const parity = this._tickets++ & 1;
+    const parity = this._tickets++ % MAX_IN_FLIGHT;
     queue.writeBuffer(buf.scalars, 0, new Float32Array(SCALARS_COUNT));
 
     const enc = device.createCommandEncoder();
     this._encodeFea(enc);
     this._encodeSimp(enc);
-    const n = this._nElements * 4;
-    enc.copyBufferToBuffer(buf.xPhys, 0, buf[`stgX${parity}`], 0, n);
-    enc.copyBufferToBuffer(buf.energy, 0, buf[`stgE${parity}`], 0, n);
-    enc.copyBufferToBuffer(buf.dispY, 0, buf[`stgD${parity}`], 0, n);
     enc.copyBufferToBuffer(buf.oc, 0, buf[`stgOc${parity}`], 0, OC_COUNT * 4);
     enc.copyBufferToBuffer(buf.scalars, 0, buf[`stgSc${parity}`], 0, SCALARS_COUNT * 4);
     queue.submit([enc.finish()]);
@@ -527,7 +532,8 @@ export class GpuPcgSolver {
   }
 
   /**
-   * Wait for a submitted iteration and mirror its result into `state`.
+   * Wait for a submitted iteration and return its scalars (compliance, volume, residual).
+   * The big arrays stay on the device; call `simpMirror` when the CPU copy is needed.
    * @param {{ parity: number, submittedAt: number }} ticket
    * @param {import('../../topo/solverState.js').SolverState} state
    */
@@ -537,10 +543,8 @@ export class GpuPcgSolver {
       throw new Error(this._lost ? `WebGPU device lost: ${this._lost.message}` : 'GPU buffers released');
     }
     const p = ticket.parity;
-    const n = this._nElements;
     const oc = new Float32Array(OC_COUNT);
     const sc = new Float32Array(SCALARS_COUNT);
-    if (!state.dispY || state.dispY.length !== n) state.dispY = new Float32Array(n);
 
     const mapInto = async (staging, bytes, apply) => {
       await staging.mapAsync(GPUMapMode.READ, 0, bytes);
@@ -551,26 +555,11 @@ export class GpuPcgSolver {
     // Map in submission order; results land only after the iteration finished.
     await mapInto(buf[`stgOc${p}`], OC_COUNT * 4, (v) => oc.set(v));
     const doneAt = now();
-    await Promise.all([
-      mapInto(buf[`stgX${p}`], n * 4, (v) => {
-        state.xPhys.set(v);
-        state.x.set(v);
-      }),
-      mapInto(buf[`stgE${p}`], n * 4, (v) => state.elementEnergies.set(v)),
-      mapInto(buf[`stgD${p}`], n * 4, (v) => state.dispY.set(v)),
-      mapInto(buf[`stgSc${p}`], SCALARS_COUNT * 4, (v) => sc.set(v)),
-    ]);
+    await mapInto(buf[`stgSc${p}`], SCALARS_COUNT * 4, (v) => sc.set(v));
     if (this._gpuError) {
       const msg = this._gpuError;
       this._gpuError = null;
       throw new Error(`WebGPU error: ${msg}`);
-    }
-
-    let maxDisp = 0;
-    const d = state.dispY;
-    for (let i = 0; i < n; i++) {
-      const a = Math.abs(d[i]);
-      if (a > maxDisp) maxDisp = a;
     }
 
     // GPU-busy time for this iteration: from when it could start to when it finished.
@@ -584,10 +573,57 @@ export class GpuPcgSolver {
       iteration: state.iteration,
       compliance: oc[OC_COMPLIANCE],
       cgResidual: Math.sqrt(Math.max(0, res2)) || cgTol,
-      maxDisp,
+      maxDisp: this._lastMaxDisp ?? 0, // refreshed by simpMirror
       avgVolume: oc[OC_VOLUME],
       timings: { feaMs: gpuMs, filterOcMs: cpuMs },
     };
+  }
+
+  /**
+   * Copy the device-resident densities / energies / displacements into `state` (CPU mirror).
+   * Queued behind every iteration already submitted, so it reflects the newest one. Calls are
+   * serialised (one staging set).
+   * @param {import('../../topo/solverState.js').SolverState} state
+   * @returns {Promise<number>} max |u_y| of the mirrored displacement field
+   */
+  simpMirror(state) {
+    const run = async () => {
+      const buf = this._buf;
+      if (!buf || !this._ready) {
+        throw new Error(this._lost ? `WebGPU device lost: ${this._lost.message}` : 'GPU buffers released');
+      }
+      const n = this._nElements;
+      if (!state.dispY || state.dispY.length !== n) state.dispY = new Float32Array(n);
+      const enc = this.device.createCommandEncoder();
+      enc.copyBufferToBuffer(buf.xPhys, 0, buf.stgMX, 0, n * 4);
+      enc.copyBufferToBuffer(buf.energy, 0, buf.stgME, 0, n * 4);
+      enc.copyBufferToBuffer(buf.dispY, 0, buf.stgMD, 0, n * 4);
+      this.queue.submit([enc.finish()]);
+      const read = async (staging, apply) => {
+        await staging.mapAsync(GPUMapMode.READ, 0, n * 4);
+        apply(new Float32Array(staging.getMappedRange(0, n * 4)));
+        staging.unmap();
+      };
+      await Promise.all([
+        read(buf.stgMX, (v) => {
+          state.xPhys.set(v);
+          state.x.set(v);
+        }),
+        read(buf.stgME, (v) => state.elementEnergies.set(v)),
+        read(buf.stgMD, (v) => state.dispY.set(v)),
+      ]);
+      let maxDisp = 0;
+      const d = state.dispY;
+      for (let i = 0; i < n; i++) {
+        const a = Math.abs(d[i]);
+        if (a > maxDisp) maxDisp = a;
+      }
+      this._lastMaxDisp = maxDisp;
+      return maxDisp;
+    };
+    const next = (this._mirrorChain ?? Promise.resolve()).then(run, run);
+    this._mirrorChain = next.catch(() => {});
+    return next;
   }
 
   // ---------------------------------------------------------------------------
@@ -625,14 +661,14 @@ export class GpuPcgSolver {
   }
 
   async _solveInner({
-    nx, ny, nz, penal, preset, scene = null, xPhys, globalU, KE = KE_24x24, elementEnergies,
+    nx, ny, nz, penal, preset, scene = null, loadCase = 0, xPhys, globalU, KE = KE_24x24, elementEnergies,
   }) {
     const nDofs = 3 * (nx + 1) * (ny + 1) * (nz + 1);
     const nElements = nx * ny * nz;
     if (xPhys.length !== nElements) throw new Error('xPhys length does not match grid');
 
     this._ensureBuffers(nx, ny, nz);
-    this._ensureConstants({ nx, ny, nz, preset, scene, KE });
+    this._ensureConstants({ nx, ny, nz, preset, scene, KE, loadCase });
     this._ensureFeaParams(penal);
     const fixedDofs = this._fixedDofs;
     const { device, queue, _buf: buf } = this;

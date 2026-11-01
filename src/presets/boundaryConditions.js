@@ -12,9 +12,9 @@ import { getCustomFixtureDescriptors } from '../scene/fixturesFromScene.js';
  * @param {string} preset
  * @param {import('../scene/types.js').Scene | null} [scene]  used when preset === 'custom'
  */
-export function applyBCs(fixedDofs, F, nx, ny, nz, preset, scene = null) {
+export function applyBCs(fixedDofs, F, nx, ny, nz, preset, scene = null, loadCase = 0) {
   if (preset === 'custom') {
-    if (scene) applyCustomBCs(fixedDofs, F, nx, ny, nz, scene);
+    if (scene) applyCustomBCs(fixedDofs, F, nx, ny, nz, scene, loadCase);
     return;
   }
   if (preset === 'bridge') {

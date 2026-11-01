@@ -32,6 +32,8 @@ struct Params {
 @group(0) @binding(7) var<storage, read_write> vC: array<f32>;
 @group(0) @binding(8) var<storage, read_write> partials: array<f32>;
 @group(0) @binding(9) var<storage, read_write> scalars: array<f32>;
+@group(0) @binding(10) var<storage, read_write> vD: array<f32>;
+@group(0) @binding(11) var<storage, read_write> vE: array<f32>;
 
 const WG: u32 = 256u;
 
@@ -59,9 +61,13 @@ fn spmv_gather(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (dof >= params.nDofs) {
     return;
   }
+  vB[dof] = spmv_at(dof);
+}
+
+// (K v)[dof] for a free dof (v = vA); fixed dofs act as identity.
+fn spmv_at(dof: u32) -> f32 {
   if (fixedMask[dof] != 0u) {
-    vB[dof] = vA[dof];
-    return;
+    return vA[dof];
   }
 
   let nxp = params.nx + 1u;
@@ -104,7 +110,7 @@ fn spmv_gather(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     sum = sum + E * s;
   }
-  vB[dof] = sum;
+  return sum;
 }
 
 @compute @workgroup_size(256)
@@ -378,4 +384,138 @@ fn element_energy(
   vB[e] = strain;
   let rp = max(rho, 1e-4);
   vC[e] = -params.penal * pow(rp, params.penal - 1.0) * (params.E0 - params.Emin) * ce;
+}
+
+// ---------------------------------------------------------------------------
+// Fused PCG iteration kernels (5 dispatches per iteration instead of 11: the
+// iteration is a chain of tiny dependent dispatches, so launch latency — not
+// arithmetic — dominates at small / medium grids).
+// ---------------------------------------------------------------------------
+
+// Ap = K p (vA = p, vB = Ap) and the per-workgroup partial sums of p·Ap.
+@compute @workgroup_size(256)
+fn spmv_dot(
+  @builtin(global_invocation_id) gid: vec3<u32>,
+  @builtin(local_invocation_id) lid: vec3<u32>,
+  @builtin(workgroup_id) wid: vec3<u32>
+) {
+  let dof = gid.x;
+  var contrib = 0.0;
+  if (dof < params.nDofs) {
+    let ap = spmv_at(dof);
+    vB[dof] = ap;
+    if (fixedMask[dof] == 0u) {
+      contrib = vA[dof] * ap;
+    }
+  }
+  sdata[lid.x] = contrib;
+  workgroupBarrier();
+  for (var s = WG / 2u; s > 0u; s = s >> 1u) {
+    if (lid.x < s) {
+      sdata[lid.x] = sdata[lid.x] + sdata[lid.x + s];
+    }
+    workgroupBarrier();
+  }
+  if (lid.x == 0u) {
+    partials[wid.x] = sdata[0];
+  }
+}
+
+// S partials ? pAp (slot 1); alpha = rzOld / pAp (slot 2). One workgroup.
+@compute @workgroup_size(256)
+fn final_alpha(@builtin(local_invocation_id) lid: vec3<u32>) {
+  var sum = 0.0;
+  var i = lid.x;
+  loop {
+    if (i >= params.nPartials) {
+      break;
+    }
+    sum = sum + partials[i];
+    i = i + WG;
+  }
+  sdata[lid.x] = sum;
+  workgroupBarrier();
+  for (var s = WG / 2u; s > 0u; s = s >> 1u) {
+    if (lid.x < s) {
+      sdata[lid.x] = sdata[lid.x] + sdata[lid.x + s];
+    }
+    workgroupBarrier();
+  }
+  if (lid.x == 0u) {
+    let pap = sdata[0];
+    scalars[1] = pap;
+    if (abs(pap) < 1e-15) {
+      scalars[2] = 0.0;
+    } else {
+      scalars[2] = scalars[0] / pap;
+    }
+  }
+}
+
+// u += alpha p;  r -= alpha Ap;  z = invDiag r;  partial sums of r·z.
+// Bindings: vA = p, vB = U, vC = r, vD = Ap, vE = z.
+@compute @workgroup_size(256)
+fn update_urz(
+  @builtin(global_invocation_id) gid: vec3<u32>,
+  @builtin(local_invocation_id) lid: vec3<u32>,
+  @builtin(workgroup_id) wid: vec3<u32>
+) {
+  let i = gid.x;
+  var contrib = 0.0;
+  if (i < params.nDofs) {
+    // Fixed dofs need no mask here (keeps this kernel within 8 storage buffers): r, z and p are
+    // exactly 0 there, so u and r stay unchanged and z stays 0.
+    let a = scalars[2];
+    vB[i] = vB[i] + a * vA[i];
+    let rn = vC[i] - a * vD[i];
+    vC[i] = rn;
+    let z = rn * invDiag[i];
+    vE[i] = z;
+    contrib = rn * z;
+  }
+  sdata[lid.x] = contrib;
+  workgroupBarrier();
+  for (var s = WG / 2u; s > 0u; s = s >> 1u) {
+    if (lid.x < s) {
+      sdata[lid.x] = sdata[lid.x] + sdata[lid.x + s];
+    }
+    workgroupBarrier();
+  }
+  if (lid.x == 0u) {
+    partials[wid.x] = sdata[0];
+  }
+}
+
+// S partials ? rzNew (slot 4); beta = rzNew / rzOld (slot 3); rzOld = rzNew; residualSq = rzNew.
+@compute @workgroup_size(256)
+fn final_beta(@builtin(local_invocation_id) lid: vec3<u32>) {
+  var sum = 0.0;
+  var i = lid.x;
+  loop {
+    if (i >= params.nPartials) {
+      break;
+    }
+    sum = sum + partials[i];
+    i = i + WG;
+  }
+  sdata[lid.x] = sum;
+  workgroupBarrier();
+  for (var s = WG / 2u; s > 0u; s = s >> 1u) {
+    if (lid.x < s) {
+      sdata[lid.x] = sdata[lid.x] + sdata[lid.x + s];
+    }
+    workgroupBarrier();
+  }
+  if (lid.x == 0u) {
+    let rzNew = sdata[0];
+    let rzOld = scalars[0];
+    scalars[4] = rzNew;
+    if (abs(rzOld) < 1e-30) {
+      scalars[3] = 0.0;
+    } else {
+      scalars[3] = rzNew / rzOld;
+    }
+    scalars[0] = rzNew;
+    scalars[5] = max(rzNew, 0.0);
+  }
 }

@@ -1,5 +1,6 @@
 import { holeLoadVectors } from './applyCustomBCs.js';
 import { holeAxialRange, holeFrame, holeRadiusCells, sphereRadiusCells, validAxis } from './geometry.js';
+import { pointLoadComponents, pointLoadMode } from './pointLoad.js';
 import { normToNodeIndices } from './tools.js';
 import { resolveWorkingBounds } from './workingVolume.js';
 
@@ -29,6 +30,7 @@ import { resolveWorkingBounds } from './workingVolume.js';
  * @property {number} [w]             wall patch extent along first in-plane axis (node units)
  * @property {number} [h]             wall patch extent along second in-plane axis (node units)
  * @property {{ x: number, y: number, z: number }} [dir]  unit force direction (loads)
+ * @property {number} [lead]          loads: draw the arrow with its tail at the node (tip `lead` units along dir)
  * @property {'sphere'|'box'} [shape] pressure cavity shape
  * @property {boolean} [outward]      radial pressure points away from cavity centre
  * @property {boolean} [radial]       pressure acts radially (vs along `dir`)
@@ -143,9 +145,27 @@ export function getCustomFixtureDescriptors(scene, nx, ny, nz) {
     const mag = Number.isFinite(f.magnitude) ? f.magnitude : 1;
     const dir = unitDir(f.fx, f.fy, f.fz, mag);
     switch (f.type) {
-      case 'point_load':
-        out.push({ kind: 'load', id: f.id, ix: c.ix, iy: c.iy, iz: c.iz, dir });
+      case 'point_load': {
+        // One arrow per force component, tip on its loaded node (burst: pointing out of the point).
+        const comps = pointLoadComponents(f, maxDim);
+        if (!comps.length) {
+          out.push({ kind: 'load', id: f.id, ix: c.ix, iy: c.iy, iz: c.iz, dir });
+          break;
+        }
+        for (const comp of comps) {
+          out.push({
+            kind: 'load',
+            id: f.id,
+            ix: Math.max(0, Math.min(nx, c.ix + comp.off[0])),
+            iy: Math.max(0, Math.min(ny, c.iy + comp.off[1])),
+            iz: Math.max(0, Math.min(nz, c.iz + comp.off[2])),
+            dir: { x: comp.dir[0], y: comp.dir[1], z: comp.dir[2] },
+            // Separate load cases act AT the point: draw each arrow starting there, pointing away.
+            lead: comps.length > 1 && pointLoadMode(f) === 'cases' ? 2.2 : undefined,
+          });
+        }
         break;
+      }
       case 'pressure': {
         const shape = f.shape === 'box' ? 'box' : 'sphere';
         const radial = f.pressureMode !== 'directional';

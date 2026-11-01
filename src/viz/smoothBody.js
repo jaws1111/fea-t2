@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { buildSmoothMesh } from './smoothMeshCore.js';
 
-const BODY_COLOR = 0xc0c8d4;
 /** Minimum gap between two mesh jobs so meshing never starves the rest of the app. */
 const MIN_JOB_GAP_MS = 90;
 
@@ -15,11 +14,12 @@ const MIN_JOB_GAP_MS = 90;
 export function createSmoothBody(scene) {
   const geometry = new THREE.BufferGeometry();
   const material = new THREE.MeshStandardMaterial({
-    color: BODY_COLOR,
+    color: 0xffffff,
+    vertexColors: true,
     metalness: 0.28,
     roughness: 0.45,
-    // Closed MC mesh; DoubleSide covers any residual winding flips after Taubin.
-    side: THREE.DoubleSide,
+    // Closed, consistently wound (outward) mesh: back faces are never visible.
+    side: THREE.FrontSide,
   });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = 'smoothBody';
@@ -69,7 +69,7 @@ function ensureWorker(api) {
   return api.worker;
 }
 
-function applyMesh(api, { positions, normals, indices }) {
+function applyMesh(api, { positions, normals, indices, colors }) {
   const old = api.geometry;
   if (positions.length === 0) {
     api.mesh.visible = false;
@@ -79,6 +79,10 @@ function applyMesh(api, { positions, normals, indices }) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   g.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  g.setAttribute(
+    'color',
+    new THREE.BufferAttribute(colors ?? new Float32Array(positions.length).fill(0.8), 3),
+  );
   g.setIndex(new THREE.BufferAttribute(indices, 1));
   g.computeBoundingSphere();
   api.geometry = g;
@@ -102,6 +106,7 @@ function onWorkerResult(api, msg) {
         positions: msg.positions,
         normals: msg.normals,
         indices: msg.indices,
+        colors: msg.colors,
       });
     }
   }
@@ -130,7 +135,10 @@ function pump(api) {
     return;
   }
   api.inFlight = true;
-  worker.postMessage({ ...job, id: job.id }, [job.densities.buffer]);
+  const transfer = [job.densities.buffer];
+  if (job.energies) transfer.push(job.energies.buffer);
+  if (job.dispY) transfer.push(job.dispY.buffer);
+  worker.postMessage(job, transfer);
 }
 
 /**
@@ -139,13 +147,33 @@ function pump(api) {
  * @param {ReturnType<typeof createSmoothBody>} meshApi
  * @param {{
  *   densities: Float32Array | null,
+ *   energies?: Float32Array | null,
+ *   dispY?: Float32Array | null,
+ *   defScale?: number,
  *   config: { nx: number, ny: number, nz: number },
  *   iso?: number,
  *   smoothIters?: number,
+ *   colorMode?: string,
+ *   lut?: Float32Array | null,
+ *   ao?: boolean,
  * }} args
  * @returns {boolean}
  */
-export function updateSmoothBody(meshApi, { densities, config, iso = 0.45, smoothIters = 4 }) {
+export function updateSmoothBody(
+  meshApi,
+  {
+    densities,
+    energies = null,
+    dispY = null,
+    defScale = 0,
+    config,
+    iso = 0.45,
+    smoothIters = 4,
+    colorMode = 'density',
+    lut = null,
+    ao = true,
+  },
+) {
   if (!meshApi?.mesh) return false;
   const { nx, ny, nz } = config;
   meshApi.wanted = true;
@@ -155,7 +183,23 @@ export function updateSmoothBody(meshApi, { densities, config, iso = 0.45, smoot
   }
   meshApi.jobId += 1;
   // The worker takes ownership of the copy; the caller's field stays intact.
-  meshApi.pending = { id: meshApi.jobId, nx, ny, nz, iso, smoothIters, densities: densities.slice() };
+  const useDefo = !!dispY && defScale > 0 && dispY.length === densities.length;
+  const needE = colorMode === 'energy' && energies && energies.length === densities.length;
+  meshApi.pending = {
+    id: meshApi.jobId,
+    nx,
+    ny,
+    nz,
+    iso,
+    smoothIters,
+    colorMode,
+    ao,
+    lut: lut ? lut.slice() : null,
+    densities: densities.slice(),
+    energies: needE ? energies.slice() : null,
+    dispY: useDefo ? dispY.slice() : null,
+    defScale: useDefo ? defScale : 0,
+  };
   // Keep showing the previous surface (if any) until the new one is ready.
   if (meshApi.geometry.index) meshApi.mesh.visible = true;
   pump(meshApi);

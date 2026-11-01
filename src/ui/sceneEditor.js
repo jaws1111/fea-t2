@@ -10,6 +10,7 @@ import { SCENE_EXAMPLES } from '../scene/templates.js';
 import {
   computeAutoWorkingBounds,
   ensureWorkingVolume,
+  pressureOverflowCells,
   sanitizeBounds,
 } from '../scene/workingVolume.js';
 import {
@@ -23,6 +24,14 @@ import {
   setLinkOffset,
 } from '../scene/links.js';
 import { analyzeScene } from '../scene/applyCustomBCs.js';
+import {
+  defaultPointDirs,
+  dirVector,
+  pointLoadAxes,
+  pointLoadDirs,
+  pointLoadMode,
+  pointSpreadCells,
+} from '../scene/pointLoad.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -38,6 +47,8 @@ const FORCE_LABELS = {
 };
 
 const MAX_UNDO = 40;
+/** Default spread (fraction of the longest side) of a multi-axis point load. */
+const BURST_SPREAD = 0.1;
 const MAX_ANALYZE_NODES = 400_000;
 
 const INPUT_CLS =
@@ -74,9 +85,10 @@ function holeSummary(f) {
  *   onSelect?: (sel: { kind: 'fixation'|'force', id: string } | null) => void,
  *   onClear?: () => void,
  *   onResolution?: (key: string) => void,
+ *   onFitDomain?: () => void,
  * }} deps
  */
-export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSelect, onClear, onResolution }) {
+export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSelect, onClear, onResolution, onFitDomain }) {
   const ac = new AbortController();
   const { signal } = ac;
   const on = (el, type, fn) => el?.addEventListener(type, fn, { signal });
@@ -177,7 +189,12 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     }
     for (const f of scene.forces ?? []) {
       const linked = linksOf(scene, f.id).length ? ' 🔗' : '';
-      const extra = f.type === 'pressure' ? ` · ${f.pressureMode === 'directional' ? 'dir' : 'radial'}` : '';
+      const extra =
+        f.type === 'pressure'
+          ? ` · ${f.pressureMode === 'directional' ? 'dir' : 'radial'}`
+          : f.type === 'point_load' && pointLoadAxes(f) > 1
+            ? ` · ${pointLoadAxes(f)} axes`
+            : '';
       rows.push({
         kind: 'force',
         id: f.id,
@@ -322,6 +339,60 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     return html;
   }
 
+  const AXES_OPTIONS = [
+    ['1', '1 axis — single force'],
+    ['2', '2 axes'],
+    ['3', '3 axes'],
+    ['4', '4 axes'],
+    ['5', '5 axes'],
+    ['6', '6 axes — all directions'],
+  ];
+
+  function pointLoadInspector(item) {
+    const n = pointLoadAxes(item);
+    let html = selectField('Force axes', 'axes', String(n), AXES_OPTIONS);
+    if (n === 1) {
+      html += field('Fx', 'fx', item.fx, 0.1, -1, 1);
+      html += field('Fy', 'fy', item.fy, 0.1, -1, 1);
+      html += field('Fz', 'fz', item.fz, 0.1, -1, 1);
+      html += field('|F|', 'magnitude', item.magnitude, 0.1, -50, 50);
+      html += dirButtons('main');
+      return html;
+    }
+    const chosen = new Set(pointLoadDirs(item));
+    const maxDim = Math.max(config?.nx ?? 0, config?.ny ?? 0, config?.nz ?? 0) || 32;
+    const burst = pointLoadMode(item) === 'burst';
+    html += selectField('Axes act', 'axesMode', burst ? 'burst' : 'cases', [
+      ['cases', 'Separately — load cases'],
+      ['burst', 'Together — burst'],
+    ]);
+    html += field('|F| per axis', 'magnitude', item.magnitude, 0.1, -50, 50);
+    if (burst) {
+      html += field(`Spread ≈ ${pointSpreadCells(item, maxDim)} cells`, 'radius', item.radius ?? 0.04, 0.01, 0.01, 0.3);
+    }
+    html += `<div class="col-span-2 flex flex-wrap gap-1">${DIR_BUTTONS.map(([t, x, y, z]) => {
+      const code = (x ? 'x' : y ? 'y' : 'z') + (x + y + z < 0 ? '-' : '+');
+      const active = chosen.has(code);
+      return `<button type="button" data-point-dir="${code}" aria-pressed="${active}" class="rounded border px-1.5 py-0.5 text-[10px] ${
+        active ? 'border-indigo-400 bg-indigo-500/25 text-indigo-100' : 'border-slate-700 text-slate-400 hover:bg-slate-800'
+      }">${t}</button>`;
+    }).join('')}</div>`;
+    html += `<p class="col-span-2 text-[10px] leading-snug text-slate-500">${
+      burst
+        ? `All ${n} directions push at once, each on the node <i>Spread</i> cells away. Self-balanced: it needs no support, so the optimizer builds a body around the point. Negative |F| pulls inward.`
+        : `The load acts along each of the ${n} directions <b>one at a time</b> (${n} load cases solved per iteration, compliances summed), so the structure must carry every direction and the supports react each one. Opposing directions never cancel.`
+    }</p>`;
+    return html;
+  }
+
+  /** Change the number of force axes of a point load (directions reset to the natural sets). */
+  function setPointAxes(item, n) {
+    item.axes = Math.max(1, Math.min(6, Math.round(n) || 1));
+    item.dirs = item.axes > 1 ? defaultPointDirs(item, item.axes) : [];
+    // A burst needs room between its arrows: widen the default single-point radius.
+    if (item.axes > 1 && pointLoadMode(item) === 'burst' && !(item.radius > 0.05)) item.radius = BURST_SPREAD;
+  }
+
   function pressureInspector(item) {
     let html = '';
     html += selectField('Shape', 'shape', item.shape, [['sphere', 'Sphere cavity'], ['box', 'Box cavity']], 1);
@@ -432,11 +503,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     } else if (item.type === 'pressure') {
       html += pressureInspector(item);
     } else {
-      html += field('Fx', 'fx', item.fx, 0.1, -1, 1);
-      html += field('Fy', 'fy', item.fy, 0.1, -1, 1);
-      html += field('Fz', 'fz', item.fz, 0.1, -1, 1);
-      html += field('|F|', 'magnitude', item.magnitude, 0.1, -50, 50);
-      html += dirButtons('main');
+      html += pointLoadInspector(item);
     }
     html += linkSection(item);
 
@@ -490,13 +557,43 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     select('fixation', f.id);
   }
 
-  function addForce(type) {
+  function addForce(type, partial = {}) {
     pushUndo();
     const scene = ensureScene();
-    const f = createForce({ type });
+    const f = createForce({ type, ...partial });
     scene.forces.push(f);
     select('force', f.id);
   }
+
+  /** Point load with `n` force axes (n > 1 starts inside the volume so every side can push). */
+  function addPointLoad(n = 1) {
+    const axes = Math.max(1, Math.min(6, Math.round(n) || 1));
+    addForce('point_load', axes > 1 ? { axes, dirs: defaultPointDirs({ fy: -1 }, axes) } : {});
+  }
+
+  const pointMenu = $('point-menu');
+  const pointMenuBtn = $('btn-add-point-menu');
+  function setPointMenu(open) {
+    pointMenu?.classList.toggle('hidden', !open);
+    pointMenuBtn?.setAttribute('aria-expanded', String(open));
+  }
+  on(pointMenuBtn, 'click', (e) => {
+    e.stopPropagation();
+    setPointMenu(pointMenu?.classList.contains('hidden') ?? false);
+  });
+  on(pointMenu, 'click', (e) => {
+    const b = e.target.closest('[data-point-axes]');
+    if (!b) return;
+    setPointMenu(false);
+    addPointLoad(Number(b.dataset.pointAxes));
+  });
+  on(document, 'click', (e) => {
+    if (!pointMenu || pointMenu.classList.contains('hidden')) return;
+    if (!e.target.closest?.('#point-menu-wrap')) setPointMenu(false);
+  });
+  on(window, 'keydown', (e) => {
+    if (e.key === 'Escape') setPointMenu(false);
+  });
 
   /** Bracket starter: clamped hole + loaded hole, rigidly linked at the current spacing. */
   function addBoltPair() {
@@ -538,7 +635,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
   on($('btn-add-bolt-hole'), 'click', () => addFixation('bolt_hole'));
   on($('btn-add-bolt-loaded'), 'click', () => addLoadedHole());
   on($('btn-add-wall-pad'), 'click', () => addFixation('wall_pad'));
-  on($('btn-add-point-load'), 'click', () => addForce('point_load'));
+  on($('btn-add-point-load'), 'click', () => addPointLoad(1));
   on($('btn-add-pressure'), 'click', () => addForce('pressure'));
   on($('btn-add-bolt-pair'), 'click', () => addBoltPair());
 
@@ -630,7 +727,8 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
           ? 'Entire FEA domain is designable.'
           : wv.mode === 'auto'
             ? 'Box fitted to holes (boss + span), pressure cavity + wall, pads, rests and loads (+ pad).'
-            : 'Edit the normalized AABB. Outside = void.';
+            : 'Manual box (0–1 of the domain). Outside = void.';
+      hint.textContent += ' Drag the corner handles in the viewport: on release the box is meshed with cubic voxels (cell count from Voxel Domain).';
     }
     const b = wv.bounds;
     const set = (id, v) => {
@@ -645,10 +743,22 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     set('wv-z1', b.z1);
     const pad = $('wv-padding');
     if (pad && document.activeElement !== pad) pad.value = String(wv.padding ?? 0.06);
-    const manual = wv.mode === 'manual';
-    for (const id of ['wv-x0', 'wv-x1', 'wv-y0', 'wv-y1', 'wv-z0', 'wv-z1']) {
-      const el = $(id);
-      if (el) el.disabled = !manual;
+    // Fields stay editable in every mode: typing in Auto / Full switches to Manual, starting from
+    // the current box.
+    const size = $('wv-size');
+    if (size) {
+      const cx = (b.x1 - b.x0) * config.nx;
+      const cy = (b.y1 - b.y0) * config.ny;
+      const cz = (b.z1 - b.z0) * config.nz;
+      size.textContent = `${cx.toFixed(1)} × ${cy.toFixed(1)} × ${cz.toFixed(1)} cells of ${config.nx} × ${config.ny} × ${config.nz}`;
+      // A cavity + wall bigger than the domain gets clipped by the domain edge: say so.
+      const over = pressureOverflowCells(config.scene, { nx: config.nx, ny: config.ny, nz: config.nz });
+      size.classList.toggle('text-amber-400', !!over);
+      size.classList.toggle('text-slate-500', !over);
+      if (over) {
+        const worst = Math.max(...Object.values(over));
+        size.textContent += `\n⚠ Pressure cavity + wall pokes out of the domain by up to ${worst.toFixed(1)} cells: press "Fit domain" to enlarge it.`;
+      }
     }
   }
 
@@ -667,6 +777,8 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
   on($('wv-mode-auto'), 'click', () => setWorkingMode('auto'));
   on($('wv-mode-manual'), 'click', () => setWorkingMode('manual'));
 
+  on($('btn-wv-fit'), 'click', () => onFitDomain?.());
+
   on($('btn-wv-refit'), 'click', () => {
     pushUndo();
     const scene = ensureScene();
@@ -681,7 +793,7 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     const scene = ensureScene();
     const wv = ensureWorkingVolume(scene, dims());
     const v = parseFloat(e.target.value);
-    wv.padding = Math.max(0, Math.min(0.4, Number.isFinite(v) ? v : 0.06));
+    wv.padding = Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0.06));
     if (wv.mode === 'auto') wv.bounds = computeAutoWorkingBounds(scene, wv.padding, dims());
     notify(false);
   });
@@ -709,6 +821,29 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
     if (unlink) {
       pushUndo();
       scene.links = ensureLinks(scene).filter((l) => l.id !== unlink.dataset.linkUnlink);
+      notify(false);
+      return;
+    }
+
+    // Point load (multi-axis): toggle one direction. Fewer than 2 left → back to a single force.
+    const pointDir = e.target.closest('[data-point-dir]');
+    if (pointDir && item.type === 'point_load') {
+      const code = pointDir.dataset.pointDir;
+      const cur = pointLoadDirs(item);
+      const next = cur.includes(code) ? cur.filter((d) => d !== code) : [...cur, code];
+      if (!next.length) return; // keep at least one direction
+      pushUndo();
+      if (next.length === 1) {
+        const v = dirVector(next[0]);
+        item.fx = v[0];
+        item.fy = v[1];
+        item.fz = v[2];
+        item.axes = 1;
+        item.dirs = [];
+      } else {
+        item.axes = next.length;
+        item.dirs = next;
+      }
       notify(false);
       return;
     }
@@ -790,6 +925,17 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
       if (!Number.isFinite(val)) return;
     } else val = t.value;
     pushUndo();
+    if (key === 'axes' && item.type === 'point_load') {
+      setPointAxes(item, Number(val));
+      notify(false);
+      return;
+    }
+    if (key === 'axesMode' && item.type === 'point_load') {
+      item.axesMode = val === 'burst' ? 'burst' : 'cases';
+      if (item.axesMode === 'burst' && !(item.radius > 0.05)) item.radius = BURST_SPREAD;
+      notify(false);
+      return;
+    }
     item[key] = val;
     // Moving via the inspector must carry linked features too.
     if (key === 'x' || key === 'y' || key === 'z') applyLinksAfterMove(scene, item.id);
@@ -840,6 +986,14 @@ export function bindSceneEditor({ config, onApply, onChange, onTabChange, onSele
   return {
     showTab,
     refresh: () => notify(false),
+    /** Swap in a re-normalised scene (grid change): old undo snapshots no longer fit. */
+    replaceScene: (scene) => {
+      config.scene = scene;
+      undoStack.length = 0;
+      selected = null;
+      onSelect?.(null);
+      notify(false);
+    },
     selectItem,
     getSelected: () => selected,
     clearScene,

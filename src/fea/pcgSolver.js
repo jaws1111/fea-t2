@@ -12,6 +12,7 @@ const { Emin, E0, maxIters, cgTol } = FEA_CONSTANTS;
  *   penal: number,
  *   preset: string,
  *   scene?: import('../scene/types.js').Scene | null,
+ *   loadCase?: number,
  *   xPhys: Float32Array,
  *   globalU: Float32Array | null,
  *   KE: Float32Array,
@@ -32,6 +33,7 @@ export function solveFEA({
   penal,
   preset,
   scene = null,
+  loadCase = 0,
   xPhys,
   globalU,
   KE,
@@ -43,7 +45,7 @@ export function solveFEA({
 
   const fixedDofs = new Uint8Array(totalDofs);
   const F = new Float32Array(totalDofs);
-  applyBCs(fixedDofs, F, nx, ny, nz, preset, scene);
+  applyBCs(fixedDofs, F, nx, ny, nz, preset, scene, loadCase);
 
   const diag = new Float32Array(totalDofs);
   const edofs = new Int32Array(24);

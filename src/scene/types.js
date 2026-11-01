@@ -12,6 +12,7 @@
 import { createDefaultWorkingVolume } from './workingVolume.js';
 import { createRigidLink, ensureLinks, pruneLinks } from './links.js';
 import { validAxis } from './geometry.js';
+import { POINT_DIRS, pointLoadAxes, pointLoadDirs, pointLoadMode } from './pointLoad.js';
 
 /**
  * @typedef {'rest_point'|'bolt_hole'|'wall_pad'} FixationType
@@ -73,7 +74,10 @@ export const BOLT_LOAD_MODES = Object.freeze(['none', 'directional', 'multi', 'c
 /**
  * A free-standing load.
  *
- * point_load : force at the node nearest (x,y,z).
+ * point_load : force at the node nearest (x,y,z). With `axes` 2..6 it carries |F| along each
+ *              chosen axis direction (`dirs`, e.g. 'x+','y-'): `axesMode` 'cases' (default) =
+ *              separate load cases the supports react one by one, 'burst' = all at once, each
+ *              `radius` cells out along its direction. See pointLoad.js.
  * pressure   : distributed load on a cavity wall ('sphere' `radius`, or 'box'
  *              half-extents hx,hy,hz). `pressureMode: 'radial'` pushes outward from
  *              the centre (`inward`/negative magnitude flips); 'directional' pushes
@@ -97,6 +101,9 @@ export const BOLT_LOAD_MODES = Object.freeze(['none', 'directional', 'multi', 'c
  * @property {boolean} inward
  * @property {boolean} cavityVoid
  * @property {number} wall   wall thickness in cells
+ * @property {number} [axes]  point_load: number of force axes 1..6 (default 1)
+ * @property {string[]} [dirs] point_load: chosen directions when axes > 1 ('x+', 'x-', ...)
+ * @property {'cases'|'burst'} [axesMode] point_load with axes > 1: separate load cases or one burst
  */
 
 /**
@@ -211,8 +218,15 @@ export function createForce(partial = {}) {
     inward: false,
     cavityVoid: true,
     wall: 2,
+    axes: 1,
+    dirs: [],
+    axesMode: 'cases',
   };
-  return { ...base, ...stripUndefined(partial) };
+  const out = { ...base, ...stripUndefined(partial) };
+  if (type === 'point_load' && out.axes > 1 && !(out.dirs?.length >= out.axes)) {
+    out.dirs = pointLoadDirs(out);
+  }
+  return out;
 }
 
 /**
@@ -348,6 +362,12 @@ export function normalizeScene(scene) {
     if (!Number.isFinite(f.magnitude)) f.magnitude = 1;
   }
   for (const f of scene.forces) {
+    if (f.type === 'point_load') {
+      f.axes = pointLoadAxes(f);
+      f.axesMode = pointLoadMode(f);
+      f.dirs = f.axes > 1 ? pointLoadDirs(f) : Array.isArray(f.dirs) ? f.dirs.filter((d) => POINT_DIRS.includes(d)) : [];
+      continue;
+    }
     if (f.type !== 'pressure') continue;
     if (typeof f.cavityVoid !== 'boolean') f.cavityVoid = true;
     if (!Number.isFinite(f.wall)) f.wall = 2;

@@ -28,27 +28,36 @@
             TopoOpt 3D
             <span id="badge-backend" class="badge-backend" data-backend="cpu">Worker · CPU</span>
           </h1>
-          <p class="text-xs text-slate-400">Zero-Stutter Threading • Transferable Buffers • Continuous PCG</p>
+          <p class="hidden text-xs text-slate-400 xl:block">Zero-Stutter Threading • Transferable Buffers • Continuous PCG</p>
         </div>
       </header>
 
       <!-- Render Modes Toolbar -->
-      <nav class="glass-panel absolute right-4 top-4 z-10 flex items-center gap-1 rounded-xl p-1.5" aria-label="View mode">
-        <button id="view-density" class="btn-tab is-active" type="button"><i class="ph ph-paint-brush"></i> Turbo Density</button>
-        <button id="view-viridis" class="btn-tab" type="button"><i class="ph ph-palette"></i> Viridis</button>
-        <button id="view-metal" class="btn-tab" type="button"><i class="ph ph-cube"></i> Metallic</button>
-        <button id="view-energy" class="btn-tab" type="button"><i class="ph ph-fire"></i> Strain Energy</button>
-        <button id="view-smooth" class="btn-tab" type="button" title="Marching cubes + Taubin smooth"><i class="ph ph-sphere"></i> Smooth Body</button>
-        <div class="mx-1 h-4 w-px bg-slate-700"></div>
-        <button
-          id="btn-reset-cam"
-          type="button"
-          title="Center View"
-          aria-label="Center view"
-          class="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-white"
-        >
-          <i class="ph ph-crosshair text-base"></i>
-        </button>
+      <nav class="glass-panel absolute right-4 top-4 z-10 flex flex-col gap-1 rounded-xl p-1.5" aria-label="View mode">
+        <!-- Level 1: representation -->
+        <div class="flex items-center gap-1" role="group" aria-label="Representation">
+          <span class="w-12 pl-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Show</span>
+          <button id="view-cubes" class="btn-tab is-active" type="button" title="Mini elements (one cube per voxel)" aria-label="Mini Elements"><i class="ph ph-cube"></i><span class="hidden xl:inline">Mini Elements</span></button>
+          <button id="view-smooth" class="btn-tab" type="button" title="Smooth body (marching cubes + Taubin)" aria-label="Smooth Body"><i class="ph ph-sphere"></i><span class="hidden xl:inline">Smooth Body</span></button>
+          <div class="mx-1 h-4 w-px bg-slate-700"></div>
+          <button
+            id="btn-reset-cam"
+            type="button"
+            title="Center View"
+            aria-label="Center view"
+            class="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-white"
+          >
+            <i class="ph ph-crosshair text-base"></i>
+          </button>
+        </div>
+        <!-- Level 2: what the colour shows (applies to both representations) -->
+        <div class="flex items-center gap-1" role="group" aria-label="Colour by">
+          <span class="w-12 pl-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Colour</span>
+          <button id="view-density" class="btn-tab is-active" type="button" title="Turbo colour map" aria-label="Turbo Density"><i class="ph ph-paint-brush"></i><span class="hidden xl:inline">Turbo Density</span></button>
+          <button id="view-viridis" class="btn-tab" type="button" title="Viridis colour map" aria-label="Viridis"><i class="ph ph-palette"></i><span class="hidden xl:inline">Viridis</span></button>
+          <button id="view-metal" class="btn-tab" type="button" title="Polished metal" aria-label="Metallic"><i class="ph ph-shield"></i><span class="hidden xl:inline">Metallic</span></button>
+          <button id="view-energy" class="btn-tab" type="button" title="Strain energy" aria-label="Strain Energy"><i class="ph ph-fire"></i><span class="hidden xl:inline">Strain Energy</span></button>
+        </div>
       </nav>
 
       <!-- Bottom stack: telemetry + legend, then performance monitor -->
@@ -144,22 +153,22 @@
             id="select-res"
             class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
           >
-            <option value="20x8x4">Fast (640)</option>
-            <option value="24x10x4">Balanced (960)</option>
-            <option value="30x12x6">Detailed (2,160)</option>
-            <option value="36x15x8" selected>High Res (4,320)</option>
-            <option value="40x16x10">Ultra (6,400)</option>
-            <option value="48x20x12">GPU Heavy (11,520)</option>
-            <option value="64x24x16">GPU Max (24,576)</option>
-            <option value="48x24x16">Vessel (48×24×16 = 18,432)</option>
-            <option value="32x32x32">Cube (32³ = 32,768)</option>
-            <option value="80x40x16">50k (80×40×16 = 51,200)</option>
-            <option value="100x40x20">80k (100×40×20 = 80,000)</option>
-            <option value="100x50x20">100k (100×50×20 = 100,000)</option>
-            <option value="120x50x25">150k (120×50×25 = 150,000)</option>
-            <option value="160x50x25">200k (160×50×25 = 200,000)</option>
-            <option value="200x50x25">250k (200×50×25 = 250,000)</option>
-            <option value="200x60x25">300k (200×60×25 = 300,000)</option>
+            <option value="20x8x4">640 voxels</option>
+            <option value="24x10x4">960 voxels</option>
+            <option value="30x12x6">2,160 voxels</option>
+            <option value="36x15x8" selected>4,320 voxels</option>
+            <option value="40x16x10">6,400 voxels</option>
+            <option value="48x20x12">11,520 voxels</option>
+            <option value="48x24x16">18,432 voxels</option>
+            <option value="64x24x16">24,576 voxels</option>
+            <option value="32x32x32">32,768 voxels</option>
+            <option value="80x40x16">51,200 voxels</option>
+            <option value="100x40x20">80,000 voxels</option>
+            <option value="100x50x20">100,000 voxels</option>
+            <option value="120x50x25">150,000 voxels</option>
+            <option value="160x50x25">200,000 voxels</option>
+            <option value="200x50x25">250,000 voxels</option>
+            <option value="200x60x25">300,000 voxels</option>
           </select>
         </div>
 
@@ -172,7 +181,7 @@
                 <label for="input-volfrac" class="text-slate-300">Volume frac</label>
                 <span id="val-volfrac" class="font-mono text-indigo-400">0.35</span>
               </div>
-              <input id="input-volfrac" type="range" min="0.15" max="0.65" step="0.05" value="0.35" />
+              <input id="input-volfrac" type="range" min="0.1" max="0.65" step="0.05" value="0.35" />
             </div>
             <div class="space-y-1">
               <div class="flex justify-between text-[11px]">
@@ -214,7 +223,12 @@
               <input id="input-defscale" type="range" min="0" max="50" step="5" value="0" />
             </div>
           </div>
+          <label class="flex items-center gap-1.5 text-[11px] text-slate-300" title="Darkens creases, bores and overhang undersides (voxel AO for cubes, baked vertex AO for the smooth body)">
+            <input id="input-ao" type="checkbox" checked class="rounded border-slate-600" />
+            Ambient occlusion
+          </label>
 
+          <div id="group-smooth-body" class="hidden space-y-2">
           <div class="section-label pt-1">Smooth body</div>
           <div class="grid grid-cols-2 gap-x-3 gap-y-2">
             <div class="space-y-1">
@@ -231,6 +245,7 @@
               </div>
               <input id="input-smooth-iters" type="range" min="0" max="20" step="1" value="4" />
             </div>
+          </div>
           </div>
         </div>
 
@@ -277,7 +292,18 @@
             <button id="btn-add-bolt-loaded" class="btn-tool !py-1" type="button" title="Loaded bolt hole: directional, multi-vector or circular load on the bore"><i class="ph ph-arrows-clockwise"></i> Loaded</button>
             <button id="btn-add-wall-pad" class="btn-tool !py-1" type="button" title="Wall mounting pad"><i class="ph ph-square"></i> Wall</button>
             <button id="btn-add-rest" class="btn-tool !py-1" type="button" title="Rest / foot support"><i class="ph ph-map-pin"></i> Rest</button>
-            <button id="btn-add-point-load" class="btn-tool !py-1" type="button"><i class="ph ph-arrow-down"></i> Point</button>
+            <div id="point-menu-wrap" class="relative flex">
+              <button id="btn-add-point-load" class="btn-tool !py-1 min-w-0 flex-1 !rounded-r-none" type="button" title="Point load, single force axis"><i class="ph ph-arrow-down"></i> Point</button>
+              <button id="btn-add-point-menu" class="btn-tool !py-1 !rounded-l-none !border-l-0 !px-1" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Point load axes" title="Point load with 2–6 force axes"><i class="ph ph-caret-down"></i></button>
+              <div id="point-menu" role="menu" class="glass-panel absolute right-0 top-full z-30 mt-1 hidden w-44 space-y-0.5 rounded-lg p-1 text-[11px] shadow-xl">
+                <button type="button" role="menuitem" data-point-axes="1" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">1 axis <span class="text-slate-500">· single force</span></button>
+                <button type="button" role="menuitem" data-point-axes="2" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">2 axes</button>
+                <button type="button" role="menuitem" data-point-axes="3" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">3 axes</button>
+                <button type="button" role="menuitem" data-point-axes="4" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">4 axes</button>
+                <button type="button" role="menuitem" data-point-axes="5" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">5 axes</button>
+                <button type="button" role="menuitem" data-point-axes="6" class="block w-full rounded px-2 py-1 text-left text-slate-200 hover:bg-slate-700/60">6 axes <span class="text-slate-500">· all directions</span></button>
+              </div>
+            </div>
             <button id="btn-add-pressure" class="btn-tool !py-1" type="button" title="Pressure cavity (void + locked wall)"><i class="ph ph-waves"></i> Press</button>
           </div>
         </div>
@@ -307,19 +333,21 @@
             <button id="wv-mode-manual" class="btn-secondary !py-1 text-[10px]" type="button" data-wv-mode="manual" title="Edit bounds manually">Manual</button>
           </div>
           <p id="wv-hint" class="text-[10px] leading-snug text-slate-500">Auto fits a box around scene objects (+ padding).</p>
+          <div id="wv-size" class="whitespace-pre-line font-mono text-[10px] text-slate-500"></div>
           <div id="wv-bounds" class="grid grid-cols-3 gap-1 text-[10px] text-slate-400">
-            <label class="flex flex-col gap-0.5">X0<input id="wv-x0" type="number" min="0" max="1" step="0.05" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
-            <label class="flex flex-col gap-0.5">Y0<input id="wv-y0" type="number" min="0" max="1" step="0.05" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
-            <label class="flex flex-col gap-0.5">Z0<input id="wv-z0" type="number" min="0" max="1" step="0.05" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
-            <label class="flex flex-col gap-0.5">X1<input id="wv-x1" type="number" min="0" max="1" step="0.05" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
-            <label class="flex flex-col gap-0.5">Y1<input id="wv-y1" type="number" min="0" max="1" step="0.05" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
-            <label class="flex flex-col gap-0.5">Z1<input id="wv-z1" type="number" min="0" max="1" step="0.05" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
+            <label class="flex flex-col gap-0.5">X0<input id="wv-x0" type="number" min="0" max="1" step="0.01" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
+            <label class="flex flex-col gap-0.5">Y0<input id="wv-y0" type="number" min="0" max="1" step="0.01" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
+            <label class="flex flex-col gap-0.5">Z0<input id="wv-z0" type="number" min="0" max="1" step="0.01" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
+            <label class="flex flex-col gap-0.5">X1<input id="wv-x1" type="number" min="0" max="1" step="0.01" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
+            <label class="flex flex-col gap-0.5">Y1<input id="wv-y1" type="number" min="0" max="1" step="0.01" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
+            <label class="flex flex-col gap-0.5">Z1<input id="wv-z1" type="number" min="0" max="1" step="0.01" class="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" /></label>
           </div>
           <div class="flex items-center gap-2 text-[10px] text-slate-400">
             <label class="flex items-center gap-1">Pad
-              <input id="wv-padding" type="number" min="0" max="0.4" step="0.02" value="0.1" class="w-14 rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" />
+              <input id="wv-padding" type="number" min="0" max="1" step="0.01" value="0.1" class="w-14 rounded border border-slate-700 bg-slate-950 px-1 py-0.5 font-mono text-[11px] text-slate-200" />
             </label>
-            <button id="btn-wv-refit" class="text-indigo-300 hover:text-indigo-200" type="button">Refit auto</button>
+            <button id="btn-wv-refit" class="text-indigo-300 hover:text-indigo-200" type="button" title="Recompute the box around all objects (+ padding)">Refit auto</button>
+            <button id="btn-wv-fit" class="ml-auto text-emerald-300 hover:text-emerald-200" type="button" title="Crop the FEA domain to this box: grid proportions = working-volume proportions, no wasted void cells">Fit domain</button>
           </div>
         </div>
 

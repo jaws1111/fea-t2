@@ -59,7 +59,7 @@ function wallFace(f) {
  *   onSelect?: (sel: { kind: 'fixation'|'force', id: string } | null) => void,
  * }} opts
  */
-export function createSceneGizmoController({ scene, camera, domElement, controls, getConfig, onSceneChanged, onSelect }) {
+export function createSceneGizmoController({ scene, camera, domElement, controls, getConfig, onSceneChanged, onSelect, onDragMove }) {
   const group = new THREE.Group();
   group.name = 'scene-gizmo-proxies';
   group.visible = false;
@@ -348,6 +348,7 @@ export function createSceneGizmoController({ scene, camera, domElement, controls
       const touched = applyLinksAfterMove(cfg.scene, f.id);
       refreshProxyPositions(cfg, touched);
     }
+    onDragMove?.();
   });
 
   tc.addEventListener('mouseUp', () => {

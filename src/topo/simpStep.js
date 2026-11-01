@@ -2,6 +2,7 @@ import { FEA_CONSTANTS } from '../config/defaults.js';
 import { KE_24x24 } from '../fea/hex8Ke.js';
 import { solveFEA } from '../fea/pcgSolver.js';
 import { applyPassiveRegions, buildPassiveMask } from '../scene/passiveVoids.js';
+import { loadCaseCount, solveLoadCasesSync } from './loadCases.js';
 import { filterSensitivities } from './sensitivityFilter.js';
 
 const { moveLimit } = FEA_CONSTANTS;
@@ -35,7 +36,9 @@ export function stepSIMP(state, options = {}) {
   const tFeaStart = performance.now();
   const feaResult =
     options.feaResult ??
-    solveFEA({
+    (loadCaseCount(state) > 1
+      ? solveLoadCasesSync(state, (p) => solveFEA({ ...p, KE }))
+      : solveFEA({
       nx,
       ny,
       nz,
@@ -46,7 +49,7 @@ export function stepSIMP(state, options = {}) {
       globalU: state.globalU,
       KE,
       elementEnergies: state.elementEnergies,
-    });
+    }));
   state.globalU = feaResult.U;
   const tFeaEnd = performance.now();
 

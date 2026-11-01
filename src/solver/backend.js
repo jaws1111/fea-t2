@@ -1,5 +1,5 @@
 import { CpuPcgSolver } from './cpuPcg.js';
-import { GpuPcgSolver } from './gpu/pcgPipeline.js';
+import { GpuPcgSolver, MAX_IN_FLIGHT } from './gpu/pcgPipeline.js';
 
 /**
  * Prefer WebGPU whenever it initialises. CPU is fallback only.
@@ -89,6 +89,8 @@ export async function createSolverBackend(options = {}) {
     },
     /** True while the GPU-resident SIMP path (FEA + filter + OC on device) is usable. */
     supportsSimp: () => !!(gpu && gpuReady && gpu.simpSubmit),
+    /** How many SIMP iterations the worker may keep queued on the device. */
+    maxInFlight: MAX_IN_FLIGHT,
     simpSubmit(state) {
       if (!gpu || !gpuReady) throw new Error('GPU backend unavailable');
       try {
@@ -102,6 +104,16 @@ export async function createSolverBackend(options = {}) {
       if (!gpu || !gpuReady) throw new Error('GPU backend unavailable');
       try {
         return await gpu.simpCollect(ticket, state);
+      } catch (err) {
+        if (fallbackOnError) demote(err);
+        throw err;
+      }
+    },
+    /** Pull the device-resident densities / energies / displacements into `state`. */
+    async simpMirror(state) {
+      if (!gpu || !gpuReady) throw new Error('GPU backend unavailable');
+      try {
+        return await gpu.simpMirror(state);
       } catch (err) {
         if (fallbackOnError) demote(err);
         throw err;

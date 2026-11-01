@@ -4,7 +4,9 @@ import { getRampCssGradient } from '../viz/colormaps.js';
 import { bindSceneEditor } from './sceneEditor.js';
 import { bindStageOptimizer } from './stageOptimizer.js';
 import { createTwoBoltBracketScene } from '../scene/templates.js';
-import { normalizeScene } from '../scene/types.js';
+import { isSceneEmpty, normalizeScene } from '../scene/types.js';
+import { fitDimsForBudget, fitGridForBounds, fitGridForScene } from '../scene/domainFit.js';
+import { archetypeDims, isArchetype } from '../presets/archetypes.js';
 
 const PRESETS = [
   { id: 'preset-bridge', key: 'bridge' },
@@ -15,12 +17,18 @@ const PRESETS = [
   { id: 'preset-custom', key: 'custom' },
 ];
 
-const VIEWS = [
+/** Level 1: how the design is drawn. */
+const REPRESENTATIONS = [
+  { id: 'view-cubes', mode: 'cubes' },
+  { id: 'view-smooth', mode: 'smooth' },
+];
+
+/** Level 2: what the colour shows (applies to both representations). */
+const COLOR_MODES = [
   { id: 'view-density', mode: 'density' },
   { id: 'view-viridis', mode: 'viridis' },
   { id: 'view-metal', mode: 'metal' },
   { id: 'view-energy', mode: 'energy' },
-  { id: 'view-smooth', mode: 'smooth' },
 ];
 
 const LEGEND_LABELS = {
@@ -28,7 +36,6 @@ const LEGEND_LABELS = {
   viridis: ['Void', 'Solid (1.0)'],
   metal: ['Void', 'Solid (1.0)'],
   energy: ['Low strain', 'High strain'],
-  smooth: ['Iso surface', 'Solid body'],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -105,6 +112,14 @@ export function bindAll({
     };
   }
 
+  /**
+   * Config used to draw supports / loads: while the Scene tab is open (or the preset is custom)
+   * the draft scene is shown — never the glyphs of whichever preset happens to be selected.
+   */
+  function fixtureConfig() {
+    return config.preset === 'custom' || sceneEditorActive() ? { ...config, preset: 'custom', scene: config.scene } : config;
+  }
+
   /** Stop, clear telemetry history, rebuild fixtures and re-initialise the worker. */
   function resetSimulation(opts = {}) {
     const { fromStage = false, init = null, clearMetrics = true } = opts ?? {};
@@ -112,7 +127,7 @@ export function bindAll({
     if (!fromStage) stageApi?.invalidate();
     if (clearMetrics) metrics?.clear();
     workerClient.reset(resetPayload(init));
-    if (sceneApi.fixturesGroup) updateBoundaryFixtures(sceneApi.fixturesGroup, config);
+    if (sceneApi.fixturesGroup) updateBoundaryFixtures(sceneApi.fixturesGroup, fixtureConfig());
     sceneApi.invalidateShadows?.();
     onSceneChange?.();
   }
@@ -129,16 +144,22 @@ export function bindAll({
   }
 
   function renderViewButtons() {
-    for (const v of VIEWS) {
-      const el = $(v.id);
-      if (!el) continue;
-      const active = v.mode === config.viewMode;
-      el.classList.toggle('is-active', active);
-      el.setAttribute('aria-pressed', String(active));
-    }
+    const mark = (list, current) => {
+      for (const v of list) {
+        const el = $(v.id);
+        if (!el) continue;
+        const active = v.mode === current;
+        el.classList.toggle('is-active', active);
+        el.setAttribute('aria-pressed', String(active));
+      }
+    };
+    mark(REPRESENTATIONS, config.viewMode);
+    mark(COLOR_MODES, config.colorMode);
+    // Smooth-body specific controls only matter for that representation.
+    $('group-smooth-body')?.classList.toggle('hidden', config.viewMode !== 'smooth');
     const ramp = $('legend-ramp');
-    if (ramp) ramp.style.background = getRampCssGradient(config.viewMode);
-    const [lo, hi] = LEGEND_LABELS[config.viewMode] ?? LEGEND_LABELS.density;
+    if (ramp) ramp.style.background = getRampCssGradient(config.colorMode);
+    const [lo, hi] = LEGEND_LABELS[config.colorMode] ?? LEGEND_LABELS.density;
     if ($('legend-min')) $('legend-min').textContent = lo;
     if ($('legend-max')) $('legend-max').textContent = hi;
   }
@@ -152,14 +173,17 @@ export function bindAll({
     if (!sel) return;
     // Grids produced by the Stage Optimizer aren't in the preset list: show them as a temporary entry.
     sel.querySelectorAll('option[data-dyn]').forEach((o) => o.remove());
-    if (![...sel.options].some((o) => o.value === key)) {
+    // A custom-scene grid fitted to the working volume keeps showing the voxel preset it
+    // was derived from (its dims follow the volume's proportions, not the preset's).
+    const fromPreset = !!config.resKey && [...sel.options].some((o) => o.value === config.resKey);
+    if (!fromPreset && ![...sel.options].some((o) => o.value === key)) {
       const opt = document.createElement('option');
       opt.value = key;
       opt.dataset.dyn = '1';
-      opt.textContent = `Stage grid (${config.nx}×${config.ny}×${config.nz} = ${total.toLocaleString()})`;
+      opt.textContent = `${total.toLocaleString()} voxels (current grid)`;
       sel.appendChild(opt);
     }
-    sel.value = key;
+    sel.value = fromPreset ? config.resKey : key;
   }
 
   function renderSliderLabels() {
@@ -192,6 +216,7 @@ export function bindAll({
     setVal('input-defscale', config.defScale);
     setVal('input-smooth-iso', config.smoothIso ?? 0.45);
     setVal('input-smooth-iters', config.smoothIters ?? 4);
+    if ($('input-ao')) $('input-ao').checked = config.ao !== false;
     workerClient.batchSize = config.batchSize;
     renderSliderLabels();
     renderResolution();
@@ -214,6 +239,21 @@ export function bindAll({
   for (const p of PRESETS) {
     on($(p.id), 'click', () => {
       config.preset = p.key;
+      if (isArchetype(p.key)) {
+        // Every archetype has its own working-volume shape: re-mesh the domain with it at the
+        // cell count chosen in "Voxel Domain".
+        const cur = `${config.nx}x${config.ny}x${config.nz}`;
+        const listed = [...($('select-res')?.options ?? [])].some((o) => !o.dataset.dyn && o.value === cur);
+        const key = config.resKey ?? (listed ? cur : null);
+        const d = archetypeDims(p.key, currentBudget());
+        const changed = d.nx !== config.nx || d.ny !== config.ny || d.nz !== config.nz;
+        config.nx = d.nx;
+        config.ny = d.ny;
+        config.nz = d.nz;
+        config.resKey = key;
+        renderResolution();
+        if (changed) onRebuild(config);
+      }
       if (p.key === 'custom') {
         if (!config.scene || (!config.scene.fixations?.length && !config.scene.forces?.length)) {
           config.scene = createTwoBoltBracketScene();
@@ -233,7 +273,7 @@ export function bindAll({
   });
 
   on($('input-volfrac'), 'input', (e) => {
-    config.volfrac = parseFloat(e.target.value);
+    config.volfrac = Math.max(0.1, parseFloat(e.target.value) || 0.35);
     renderSliderLabels();
     workerClient.updateParams({ volfrac: config.volfrac });
   });
@@ -256,6 +296,11 @@ export function bindAll({
     sceneApi.redraw?.();
   });
 
+  on($('input-ao'), 'change', (e) => {
+    config.ao = !!e.target.checked;
+    sceneApi.redraw?.();
+  });
+
   on($('input-defscale'), 'input', (e) => {
     config.defScale = parseFloat(e.target.value);
     renderSliderLabels();
@@ -275,21 +320,64 @@ export function bindAll({
   });
 
   /* ---------------- Resolution ---------------- */
+  /**
+   * Custom scenes treat a voxel preset as a CELL BUDGET: the grid takes the proportions of
+   * the working volume (and the scene is cropped to it) instead of the preset's fixed aspect.
+   */
+  function applyGridBudget(budget, key) {
+    const fit = fitGridForScene(config.scene, { nx: config.nx, ny: config.ny, nz: config.nz }, budget);
+    config.nx = fit.dims.nx;
+    config.ny = fit.dims.ny;
+    config.nz = fit.dims.nz;
+    config.resKey = key;
+    if (fit.cropped) sceneEditor.replaceScene(fit.scene);
+  }
+
+  const hasScene = () => !!config.scene && !isSceneEmpty(config.scene);
+
   on($('select-res'), 'change', (e) => {
     setRunning(false);
     const [nx, ny, nz] = e.target.value.split('x').map(Number);
-    config.nx = nx;
-    config.ny = ny;
-    config.nz = nz;
+    if (config.preset === 'custom' && hasScene()) {
+      applyGridBudget(nx * ny * nz, e.target.value);
+    } else {
+      // Entries are cell budgets: an archetype meshes its own working-volume shape with them,
+      // an empty custom scene keeps the current proportions.
+      const budget = nx * ny * nz;
+      const d = isArchetype(config.preset)
+        ? archetypeDims(config.preset, budget)
+        : fitDimsForBudget({ x: config.nx, y: config.ny, z: config.nz }, budget);
+      config.nx = d.nx;
+      config.ny = d.ny;
+      config.nz = d.nz;
+      config.resKey = e.target.value;
+    }
     renderResolution();
     onRebuild(config);
     resetSimulation();
   });
 
+  /** Scene tab: crop the domain to the working volume at the current cell count. */
+  function fitDomainToVolume() {
+    if (!hasScene()) return;
+    setRunning(false);
+    applyGridBudget(config.nx * config.ny * config.nz, null);
+    renderResolution();
+    onRebuild(config);
+    resetSimulation();
+  }
+
   /* ---------------- View modes ---------------- */
-  for (const v of VIEWS) {
+  for (const v of REPRESENTATIONS) {
     on($(v.id), 'click', () => {
       config.viewMode = v.mode;
+      renderViewButtons();
+      sceneApi.redraw?.();
+    });
+  }
+  for (const v of COLOR_MODES) {
+    on($(v.id), 'click', () => {
+      config.colorMode = v.mode;
       renderViewButtons();
       sceneApi.redraw?.();
     });
@@ -299,10 +387,12 @@ export function bindAll({
 
   const sceneEditor = bindSceneEditor({
     config,
+    onFitDomain: fitDomainToVolume,
     onResolution: (key) => {
       const [nx, ny, nz] = key.split('x').map(Number);
       if (![nx, ny, nz].every((v) => Number.isFinite(v) && v > 0)) return;
       setRunning(false);
+      config.resKey = null;
       config.nx = nx;
       config.ny = ny;
       config.nz = nz;
@@ -318,11 +408,7 @@ export function bindAll({
     onChange: () => {
       // Always preview fixtures from the draft scene while editing / when custom.
       if (sceneApi.fixturesGroup) {
-        const previewCfg =
-          config.preset === 'custom' || sceneEditorActive()
-            ? { ...config, preset: 'custom', scene: config.scene }
-            : config;
-        updateBoundaryFixtures(sceneApi.fixturesGroup, previewCfg);
+        updateBoundaryFixtures(sceneApi.fixturesGroup, fixtureConfig());
         sceneApi.invalidateShadows?.();
       }
       onSceneChange?.();
@@ -367,6 +453,7 @@ export function bindAll({
     config.nx = dims.nx;
     config.ny = dims.ny;
     config.nz = dims.nz;
+    config.resKey = null;
     if (Number.isFinite(rmin)) config.rmin = rmin;
     renderResolution();
     renderSliderLabels();
@@ -376,6 +463,46 @@ export function bindAll({
     resetSimulation({ fromStage: true, init, clearMetrics });
   }
 
+  /* ---------------- Working-volume corner handles ---------------- */
+
+  /** Cell budget of the Voxel Domain setting (the chosen preset, else the current cell count). */
+  function currentBudget() {
+    const key = config.resKey ?? `${config.nx}x${config.ny}x${config.nz}`;
+    const [a, b, c] = key.split('x').map(Number);
+    return a * b * c;
+  }
+
+  /** Live readout while a corner is dragged: the grid the box will be meshed into. */
+  function previewWorkingVolume(bounds) {
+    const el = $('wv-size');
+    if (!el) return;
+    if (!bounds) return;
+    const size = {
+      x: Math.max(1e-3, (bounds.x1 - bounds.x0) * config.nx),
+      y: Math.max(1e-3, (bounds.y1 - bounds.y0) * config.ny),
+      z: Math.max(1e-3, (bounds.z1 - bounds.z0) * config.nz),
+    };
+    const d = fitDimsForBudget(size, currentBudget());
+    el.textContent = `Box → ${d.nx} × ${d.ny} × ${d.nz} = ${(d.nx * d.ny * d.nz).toLocaleString()} cubic voxels`;
+  }
+
+  /** Corner drag released: crop / grow the domain to the box and mesh it at the preset budget. */
+  function commitWorkingVolume(bounds) {
+    setRunning(false);
+    const cur = `${config.nx}x${config.ny}x${config.nz}`;
+    const listed = [...($('select-res')?.options ?? [])].some((o) => !o.dataset.dyn && o.value === cur);
+    const key = config.resKey ?? (listed ? cur : null);
+    const fit = fitGridForBounds(config.scene, { nx: config.nx, ny: config.ny, nz: config.nz }, bounds, currentBudget());
+    config.nx = fit.dims.nx;
+    config.ny = fit.dims.ny;
+    config.nz = fit.dims.nz;
+    config.resKey = key;
+    sceneEditor.replaceScene(fit.scene);
+    renderResolution();
+    onRebuild(config);
+    stageApi?.invalidate();
+    resetSimulation();
+  }
   stageApi = bindStageOptimizer({
     config,
     workerClient,
@@ -393,6 +520,8 @@ export function bindAll({
     resetSimulation,
     syncUI,
     sceneEditor,
+    previewWorkingVolume,
+    commitWorkingVolume,
     stage: stageApi,
     dispose: () => {
       stageApi?.dispose();

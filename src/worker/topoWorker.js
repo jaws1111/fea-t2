@@ -26,6 +26,7 @@ import {
   INIT, RESET, STEP, RUN, PAUSE, ACK, UPDATE_PARAMS, STATE_UPDATE,
 } from './protocol.js';
 import { createSolverState, resetSolverState, updateSolverParams } from '../topo/solverState.js';
+import { loadCaseCount, solveLoadCasesAsync } from '../topo/loadCases.js';
 import { stepSIMP } from '../topo/simpStep.js';
 import { getNodeIndex } from '../fea/indexing.js';
 
@@ -123,25 +124,31 @@ async function runOneStep() {
     const meta = stepSIMP(state, { KE: state.KE });
     return { ...meta, solveBackend: 'cpu' };
   }
-  const feaResult = await solver.solve({
-    nx: state.nx,
-    ny: state.ny,
-    nz: state.nz,
-    penal: state.penal,
-    preset: state.preset,
-    scene: state.scene,
-    xPhys: state.xPhys,
-    globalU: state.globalU,
-    KE: state.KE,
-    elementEnergies: state.elementEnergies,
-  });
+  // Several load cases (multi-axis point loads) = one solve per case, results summed.
+  const feaResult =
+    loadCaseCount(state) > 1
+      ? await solveLoadCasesAsync(state, (p) => solver.solve(p))
+      : await solver.solve({
+          nx: state.nx,
+          ny: state.ny,
+          nz: state.nz,
+          penal: state.penal,
+          preset: state.preset,
+          scene: state.scene,
+          xPhys: state.xPhys,
+          globalU: state.globalU,
+          KE: state.KE,
+          elementEnergies: state.elementEnergies,
+        });
   if (feaResult.backendNote) backendNote = feaResult.backendNote;
   const meta = stepSIMP(state, { KE: state.KE, feaResult });
   return { ...meta, solveBackend: feaResult.backend ?? solver.getName() };
 }
 
 const yieldToEventLoop = () => new Promise((r) => setTimeout(r, 0));
-const gpuSimpReady = () => !!solver?.supportsSimp?.();
+// The GPU-resident SIMP step solves ONE load case; scenes with several cases use the
+// per-case solve path (GPU FEA per case, filter + OC on the CPU).
+const gpuSimpReady = () => !!solver?.supportsSimp?.() && !(state && loadCaseCount(state) > 1);
 
 // --- autonomous run bookkeeping (touched from onmessage, outside the serial queue) ---
 let runActive = false;
@@ -155,9 +162,10 @@ let unacked = 0;
 /**
  * Iterate SIMP either a fixed number of times (STEP) or until PAUSE (RUN).
  *
- * GPU path keeps up to two iterations queued: while the CPU mirrors the result of
- * iteration k (and the main thread renders it), iteration k+1 is already executing,
- * so the device is never starved by CPU phases or message latency.
+ * GPU path keeps several iterations queued (`solver.maxInFlight`) and reads back only their
+ * scalars; the densities are mirrored from the device once per progress reply, concurrently
+ * with the iterations still executing, so the device is never starved by CPU phases or message
+ * latency.
  *
  * @param {{ maxIters: number, continuous: boolean }} opts
  */
@@ -169,11 +177,37 @@ async function iterate({ maxIters, continuous }) {
   let lastBackend = 'cpu';
   let lastMeta = null;
 
+  /** The device holds iterations the CPU mirror has not seen yet. */
+  let gpuDirty = false;
+  /** Most recent mirror + post still in flight (replies must stay in order). */
+  let mirrorPost = Promise.resolve();
+
+  /**
+   * Post a progress reply. On the GPU path the densities are fetched from the device first —
+   * without stalling the loop: iterations keep being submitted while the copy is in flight.
+   * Returns a promise that settles once the reply is posted.
+   */
   const flush = (final, extra = {}) => {
+    const meta = buildMeta(final, extra);
+    if (!gpuDirty) {
+      mirrorPost = mirrorPost.then(() => postState(meta));
+      return mirrorPost;
+    }
+    gpuDirty = false;
+    mirrorPost = mirrorPost.then(() =>
+      solver.simpMirror(state).then(
+        (maxDisp) => postState({ ...meta, maxDisp }),
+        (err) => postState({ ...meta, error: String(err?.message ?? err), runEnded: true }),
+      ),
+    );
+    return mirrorPost;
+  };
+
+  const buildMeta = (final, extra = {}) => {
     const n = Math.max(1, acc.steps);
     const now = performance.now();
     const last = acc.last ?? lastMeta;
-    postState({
+    const meta = {
       iteration: last ? last.iteration : state.iteration,
       compliance: last ? last.compliance : 0,
       cgResidual: last ? last.cgResidual : 0,
@@ -190,9 +224,10 @@ async function iterate({ maxIters, continuous }) {
         batchMs: now - sinceReply,
       },
       ...extra,
-    });
+    };
     acc = { steps: 0, fea: 0, filt: 0, last: null };
     sinceReply = now;
+    return meta;
   };
 
   const record = (m, solveBackend) => {
@@ -206,24 +241,27 @@ async function iterate({ maxIters, continuous }) {
   };
 
   const wantMore = () => !stopRequested && (continuous || submitted < maxIters);
+  const depth = Math.max(2, solver?.maxInFlight ?? 2);
 
   try {
     for (;;) {
       if (gpuSimpReady()) {
         try {
-          while (wantMore() && inflight.length < 2) {
+          while (wantMore() && inflight.length < depth) {
             inflight.push(solver.simpSubmit(state));
             submitted += 1;
           }
           if (!inflight.length) break;
           const ticket = inflight.shift();
           record(await solver.simpCollect(ticket, state), 'webgpu');
+          gpuDirty = true;
         } catch (err) {
           if (gpuSimpReady()) throw err;
           // Backend demoted itself to CPU: drop queued GPU work (the CPU mirror holds
-          // the last collected iteration) and continue on the CPU path.
+          // the last mirrored iteration) and continue on the CPU path.
           submitted -= inflight.length;
           inflight.length = 0;
+          gpuDirty = false;
           backendNote = `GPU step failed, using CPU: ${err?.message ?? err}`;
           continue;
         }
@@ -253,10 +291,11 @@ async function iterate({ maxIters, continuous }) {
       }
     }
   } catch (err) {
-    flush(true, { error: String(err?.message ?? err) });
+    gpuDirty = false; // the device state is unreliable after an error: no mirror
+    await flush(true, { error: String(err?.message ?? err) });
     return;
   }
-  flush(true);
+  await flush(true);
 }
 
 async function handle(msg) {
